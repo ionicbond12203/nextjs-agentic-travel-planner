@@ -55,29 +55,36 @@ function getFastIntent(message: string, state: DialogueState): string | null {
 }
 
 /**
- * [Workflow: Consolidator] Single LLM call for Intent + Guardrails
+ * [Workflow: Consolidator] Single LLM call for Intent + Guardrails + Slot Extraction
  */
-async function analyzeRequest(messages: any[]): Promise<{ intent: string; safe: boolean; message?: string }> {
+async function analyzeRequest(messages: any[]): Promise<{ 
+  intent: string; 
+  safe: boolean; 
+  message?: string;
+  slots: { originCity?: string; destination?: string; tripDuration?: string; travelStyle?: string }
+}> {
   const lastMessage = messages[messages.length - 1].content;
-  if (typeof lastMessage !== 'string') return { intent: 'travel_planning', safe: true };
+  if (typeof lastMessage !== 'string') return { intent: 'travel_planning', safe: true, slots: {} };
 
-  console.log("[Optimization] Calling single LLM for Analysis...");
+  console.log("[Optimization] Calling Super Analyzer...");
   try {
     const { text } = await generateText({
       model: ollama("qwen3.5:cloud"),
-      system: `You are a request analyzer for a travel assistant.
+      system: `You are a travel assistant analyzer.
       Analyze the user input and respond in JSON format:
       {
         "intent": "travel_planning" | "flight_inquiry" | "general_chat" | "out_of_scope",
         "safe": boolean,
-        "violation_reason": string | null
+        "violation_reason": string | null,
+        "extracted_slots": {
+           "originCity": "3-letter airport code if mentioned",
+           "destination": "City name if mentioned",
+           "tripDuration": "Duration if mentioned",
+           "travelStyle": "Style if mentioned"
+        }
       }
-      Safety guidelines: Block dangerous, illegal, or malicious prompts.
-      Intent guidelines: 
-      - travel_planning: trip advice, attractions, slot-filling.
-      - flight_inquiry: flight search/info.
-      - general_chat: small talk.
-      - out_of_scope: unrelated topics.`,
+      Safety: Block dangerous/illegal prompts.
+      Intents: travel_planning (trip advice/slots), flight_inquiry (flights), general_chat (small talk), out_of_scope (unrelated).`,
       prompt: lastMessage,
     });
     
@@ -85,11 +92,12 @@ async function analyzeRequest(messages: any[]): Promise<{ intent: string; safe: 
     return {
       intent: result.intent || 'travel_planning',
       safe: result.safe !== false,
-      message: result.violation_reason || "抱歉，您的请求超出服务范围。"
+      message: result.violation_reason || "抱歉，您的请求超出服务范围。",
+      slots: result.extracted_slots || {}
     };
   } catch (e) {
-    console.error("[Optimization] Analysis failed, falling back to safe default.");
-    return { intent: 'travel_planning', safe: true };
+    console.error("[Optimization] Analysis failed.");
+    return { intent: 'travel_planning', safe: true, slots: {} };
   }
 }
 
@@ -126,7 +134,7 @@ export async function POST(req: Request) {
   const currentDateTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const currentYear = new Date().getFullYear();
 
-  state = extractStateFromHistory(messages, state);
+  state = extractStateFromToolResults(messages, state);
 
   const baseSystemPrompt = buildSystemPrompt({
     state,
@@ -145,15 +153,27 @@ export async function POST(req: Request) {
     console.log("[Optimization] Fast-routing matched:", fastIntent);
     intent = fastIntent;
   } else {
-    // Only call LLM for complex/unclear inputs
     const analysis = await analyzeRequest(sanitizedMessages);
     intent = analysis.intent;
     safety = { safe: analysis.safe, message: analysis.message || "" };
+    
+    // [Refactor: Centralized Slot Update]
+    if (analysis.slots && intent !== 'out_of_scope') {
+      Object.entries(analysis.slots).forEach(([k, v]) => {
+        if (v && !(state.slots as any)[k]) {
+          (state.slots as any)[k] = v;
+          if (k === 'originCity') state.slots.currency = getCurrencyForOrigin(v);
+        }
+      });
+    }
   }
 
   if (!safety.safe) {
     return new Response(JSON.stringify({ error: safety.message }), { status: 403 });
   }
+
+  // Use the legacy extractor ONLY for tool result reconciliation
+  state = extractStateFromToolResults(messages, state);
 
   // --- Tool Definitions ---
 
@@ -242,9 +262,7 @@ export async function POST(req: Request) {
           arrival: `${f.flights[f.flights.length-1].arrival_airport.id} ${f.flights[f.flights.length-1].arrival_airport.time}`,
           duration: `${Math.floor(f.total_duration / 60)}h ${f.total_duration % 60}m`,
         }));
-        state.stage = 'planning';
-        sessionStates.set(sessionId, state);
-        return { success: true, data: best_flights, _stateUpdate: { stage: 'planning' } };
+        return { success: true, data: best_flights };
       } catch (e: any) { return { error: e.message }; }
     }
   } as any);
@@ -274,12 +292,7 @@ export async function POST(req: Request) {
       value: z.string(),
     }),
     execute: async ({ slot_type, value }: any) => {
-      (state.slots as any)[slot_type] = value;
-      const slotNames: any = { originCity: '出发城市', destination: '目的地', tripDuration: '行程天数', travelStyle: '旅行风格' };
-      state.confirmations.push(`✓ ${slotNames[slot_type]}: ${value}`);
-      if (getMissingSlots(state).length === 0) state.stage = 'planning';
-      sessionStates.set(sessionId, state);
-      return { success: true, slotType: slot_type, value, currentState: state };
+      return { success: true, slotType: slot_type, value };
     }
   } as any);
 
@@ -309,14 +322,22 @@ export async function POST(req: Request) {
     tools: activeTools,
   });
 
+  // Save final state before returning (handles analyzer's updates)
+  sessionStates.set(sessionId, state);
+
   return result.toDataStreamResponse();
 }
 
 /**
  * 从对话历史中提取状态更新
  */
-function extractStateFromHistory(messages: any[], state: DialogueState): DialogueState {
-  // 遍历消息历史，检测用户选择与工具结果
+/**
+ * 仅从工具调用的结果中提取状态同步
+ */
+function extractStateFromToolResults(messages: any[], state: DialogueState): DialogueState {
+  state.confirmations = [];
+  const slotNames: any = { originCity: '出发城市', destination: '目的地', tripDuration: '行程天数', travelStyle: '旅行风格' };
+
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.toolInvocations) {
       for (const inv of msg.toolInvocations) {
@@ -325,150 +346,29 @@ function extractStateFromHistory(messages: any[], state: DialogueState): Dialogu
           const slotType = inv.args?.slot_type || inv.slot_type;
           
           if (slotType && val) {
-            // Update the slot directly from the tool result
             if (slotType === 'originCity' && typeof val === 'string' && val.includes('(')) {
                 const codeMatch = val.match(/\(([A-Z]{3})\)/);
                 if (codeMatch) {
                     (state.slots as any)[slotType] = codeMatch[1];
                     state.slots.currency = getCurrencyForOrigin(codeMatch[1]);
-                } else {
-                    (state.slots as any)[slotType] = val;
-                }
-            } else if (slotType === 'originCity' && typeof val === 'string') {
-                const airportPatterns: Record<string, RegExp> = {
-                  'KUL': /吉隆坡|kul|kuala lumpur/i,
-                  'PEN': /槟城|pen|penang/i,
-                  'JHB': /新山|jhb|johor bahru|jb(?!k)/i,
-                  'KCH': /古晋|kch|kuching/i,
-                  'BKI': /亚庇|bki|kota kinabalu/i,
-                  'SIN': /新加坡|sin|singapore/i,
-                };
-                let matched = false;
-                for (const [code, pattern] of Object.entries(airportPatterns)) {
-                  if (pattern.test(val)) {
-                    (state.slots as any)[slotType] = code;
-                    state.slots.currency = getCurrencyForOrigin(code);
-                    matched = true;
-                    break;
-                  }
-                }
-                if (!matched) (state.slots as any)[slotType] = val;
+                } else { (state.slots as any)[slotType] = val; }
             } else {
               (state.slots as any)[slotType] = val;
+            }
+            
+            const label = slotNames[slotType];
+            if (label) {
+              const entry = `✓ ${label}: ${val}`;
+              if (!state.confirmations.includes(entry)) state.confirmations.push(entry);
             }
           }
         }
       }
     }
-
-    if (msg.role !== 'user') continue;
-
-    const content = msg.content?.toLowerCase() || '';
-
-    // 出发城市检测
-    if (!state.slots.originCity) {
-      const airportPatterns: Record<string, RegExp> = {
-        'KUL': /吉隆坡|kul|kuala lumpur/i,
-        'PEN': /槟城|pen|penang/i,
-        'JHB': /新山|jhb|johor bahru|jb(?!k)/i,
-        'KCH': /古晋|kch|kuching/i,
-        'BKI': /亚庇|bki|kota kinabalu/i,
-        'SIN': /新加坡|sin|singapore/i,
-        'PEK': /北京|pek|beijing/i,
-        'PVG': /上海|pvg|shanghai/i,
-        'CAN': /广州|can|guangzhou/i,
-        'SZX': /深圳|szx|shenzhen/i,
-        'HKG': /香港|hkg|hong kong/i,
-      };
-
-      for (const [code, pattern] of Object.entries(airportPatterns)) {
-        if (pattern.test(content)) {
-          state.slots.originCity = code;
-          state.slots.currency = getCurrencyForOrigin(code);
-          break;
-        }
-      }
-    }
-
-    // 目的地检测
-    if (!state.slots.destination) {
-      const destPatterns: Record<string, string> = {
-        '巴黎': 'Paris',
-        '法国': 'Paris',
-        'Paris': 'Paris',
-        '伦敦': 'London',
-        '英国': 'London',
-        '罗马': 'Rome',
-        '意大利': 'Rome',
-        '柏林': 'Berlin',
-        '德国': 'Berlin',
-        '东京': 'Tokyo',
-        '日本': 'Tokyo',
-        '首尔': 'Seoul',
-        '韩国': 'Seoul',
-        '曼谷': 'Bangkok',
-        '泰国': 'Bangkok',
-        '新加坡': 'Singapore',
-      };
-
-      for (const [keyword, dest] of Object.entries(destPatterns)) {
-        if (content.includes(keyword)) {
-          state.slots.destination = dest;
-          break;
-        }
-      }
-    }
-
-    // 行程天数检测
-    if (!state.slots.tripDuration) {
-      const durationPatterns = [
-        /(\d+)\s*[-~到]\s*(\d+)\s*天/,
-        /(\d+)\s*天/,
-        /一周|7天/,
-        /两周|14天/,
-      ];
-
-      for (const pattern of durationPatterns) {
-        if (pattern.test(content)) {
-          state.slots.tripDuration = content.match(pattern)?.[0] || content;
-          break;
-        }
-      }
-
-      // 选项匹配
-      const durationOptions = ['3-5天', '6-8天', '9-12天', '两周以上'];
-      for (const opt of durationOptions) {
-        if (content.includes(opt)) {
-          state.slots.tripDuration = opt;
-          break;
-        }
-      }
-    }
-
-    // 旅行风格检测
-    if (!state.slots.travelStyle) {
-      const styleKeywords: Record<string, string> = {
-        '文化': '文化历史探索',
-        '历史': '文化历史探索',
-        '博物馆': '文化历史探索',
-        '美食': '美食体验',
-        '购物': '购物休闲',
-        '艺术': '艺术博物馆',
-      };
-
-      for (const [keyword, style] of Object.entries(styleKeywords)) {
-        if (content.includes(keyword)) {
-          state.slots.travelStyle = style;
-          break;
-        }
-      }
-    }
   }
 
-  // 更新阶段
   if (getMissingSlots(state).length === 0 && state.stage === 'collecting') {
     state.stage = 'planning';
   }
-
   return state;
 }
