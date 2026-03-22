@@ -1,4 +1,4 @@
-import { streamText, tool } from "ai";
+import { streamText, tool, generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import {
@@ -30,299 +30,283 @@ function getSessionId(req: Request): string {
   return `${ip}-${ua}`.slice(0, 64);
 }
 
+/**
+ * Quick heuristic-based classification to bypass LLM latency
+ */
+function getFastIntent(message: string, state: DialogueState): string | null {
+  const content = message.toLowerCase();
+  
+  // 1. Safety/Greeting Bypass
+  if (/^(hi|hello|hey|你好|您好|哈喽|早上好|下午好|在吗)/i.test(content) && content.length < 15) {
+    return 'general_chat';
+  }
+  
+  // 2. Intent Keywords
+  if (content.includes('航班') || content.includes('飞机') || content.includes('机票') || content.includes('flight')) {
+    return 'flight_inquiry';
+  }
+
+  // 3. Stage-based Routing
+  if (state.stage === 'collecting' && (content.includes('天') || content.includes('风格') || content.includes('去'))) {
+    return 'travel_planning';
+  }
+
+  return null;
+}
+
+/**
+ * [Workflow: Consolidator] Single LLM call for Intent + Guardrails
+ */
+async function analyzeRequest(messages: any[]): Promise<{ intent: string; safe: boolean; message?: string }> {
+  const lastMessage = messages[messages.length - 1].content;
+  if (typeof lastMessage !== 'string') return { intent: 'travel_planning', safe: true };
+
+  console.log("[Optimization] Calling single LLM for Analysis...");
+  try {
+    const { text } = await generateText({
+      model: ollama("qwen3.5:cloud"),
+      system: `You are a request analyzer for a travel assistant.
+      Analyze the user input and respond in JSON format:
+      {
+        "intent": "travel_planning" | "flight_inquiry" | "general_chat" | "out_of_scope",
+        "safe": boolean,
+        "violation_reason": string | null
+      }
+      Safety guidelines: Block dangerous, illegal, or malicious prompts.
+      Intent guidelines: 
+      - travel_planning: trip advice, attractions, slot-filling.
+      - flight_inquiry: flight search/info.
+      - general_chat: small talk.
+      - out_of_scope: unrelated topics.`,
+      prompt: lastMessage,
+    });
+    
+    const result = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1));
+    return {
+      intent: result.intent || 'travel_planning',
+      safe: result.safe !== false,
+      message: result.violation_reason || "抱歉，您的请求超出服务范围。"
+    };
+  } catch (e) {
+    console.error("[Optimization] Analysis failed, falling back to safe default.");
+    return { intent: 'travel_planning', safe: true };
+  }
+}
+
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  // 提取原始数据并转换为对 LLM 友好的格式，主要是绕过 Ollama 对 role: 'tool' 的解析问题
+  // 提取原始数据并转换为对 LLM 友好的格式
   const sanitizedMessages: any[] = [];
   for (const m of messages) {
     if (m.role === 'assistant' && m.toolInvocations) {
       const newMsg = { ...m };
-      
-      // 我们只针对 ask_user_preference 这种在客户端执行、会打断对话流的工具进行重写
       const askPrefTools = newMsg.toolInvocations.filter((t: any) => t.toolName === 'ask_user_preference' && t.state === 'result');
       const otherTools = newMsg.toolInvocations.filter((t: any) => !(t.toolName === 'ask_user_preference' && t.state === 'result'));
       
-      // 保留处理过的部分以避免LLM丢失查询结果数据（如机票、景点）。只移除 ask_user_preference 结果
       newMsg.toolInvocations = otherTools;
-      
-      if (newMsg.toolInvocations.length === 0) {
-        delete newMsg.toolInvocations;
-      }
-      
+      if (newMsg.toolInvocations.length === 0) delete newMsg.toolInvocations;
       if (!newMsg.content && (!newMsg.toolInvocations || newMsg.toolInvocations.length === 0)) {
         newMsg.content = "让我确认一下您的偏好和信息。";
       }
+      if (newMsg.content || newMsg.toolInvocations) sanitizedMessages.push(newMsg);
       
-      // 只加入 assistant 消息
-      if (newMsg.content || newMsg.toolInvocations) {
-        sanitizedMessages.push(newMsg);
-      }
-      
-      // 如果有问答结果，作为 user message 随后追加
       if (askPrefTools.length > 0) {
         const answers = askPrefTools.map((t: any) => `我选择的内容是：${t.result}`).join('\n');
-        
-        sanitizedMessages.push({
-          role: 'user',
-          content: answers
-        });
+        sanitizedMessages.push({ role: 'user', content: answers });
       }
     } else {
       sanitizedMessages.push(m);
     }
   }
 
-  // 获取或创建会话状态
   const sessionId = getSessionId(req);
   let state = sessionStates.get(sessionId) || initDialogueState();
-
-  // 注入环境上下文
   const country = req.headers.get('x-vercel-ip-country') || 'Malaysia (MYR)';
   const currentDateTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const currentYear = new Date().getFullYear();
 
-  // 从对话历史中提取状态更新
   state = extractStateFromHistory(messages, state);
 
-  // 构建动态系统提示
-  const systemPrompt = buildSystemPrompt({
+  const baseSystemPrompt = buildSystemPrompt({
     state,
     currentDateTime,
     currentYear,
     userCountry: country,
   });
 
-  // 检查是否允许调用航班API
-  const allowFlightSearch = canSearchFlights(state);
+  // [Optimization: Hybrid Routing & Parallelization]
+  const lastMsgContent = sanitizedMessages[sanitizedMessages.length - 1].content;
+  let intent: string;
+  let safety = { safe: true, message: "" };
+
+  const fastIntent = getFastIntent(lastMsgContent, state);
+  if (fastIntent) {
+    console.log("[Optimization] Fast-routing matched:", fastIntent);
+    intent = fastIntent;
+  } else {
+    // Only call LLM for complex/unclear inputs
+    const analysis = await analyzeRequest(sanitizedMessages);
+    intent = analysis.intent;
+    safety = { safe: analysis.safe, message: analysis.message || "" };
+  }
+
+  if (!safety.safe) {
+    return new Response(JSON.stringify({ error: safety.message }), { status: 403 });
+  }
+
+  // --- Tool Definitions ---
+
+  const ask_user_preference = tool({
+    description: `当需要向用户询问偏好并期望用户在选项中做选择时调用。
+【极其重要】在信息收集阶段，必须通过此工具询问用户，禁止在普通文本中再次列出选项！
+【核心约束】绝对禁止在同一次回复中生成多个 ask_user_preference 调用。每次只能询问一个未确认的信息！`,
+    parameters: z.object({
+      question: z.string().describe('你想问用户的问题（不要包含选项），例如 "您计划在巴黎停留多少天？"'),
+      options: z.array(z.string()).describe('提供给用户的具体选项数组，例如 ["3-5天", "6-8天", "一周以上"]（最多4个）'),
+      slot_type: z.enum(['originCity', 'destination', 'tripDuration', 'travelStyle']).optional()
+        .describe('此问题对应的槽位类型，用于状态追踪'),
+    }),
+  });
+
+  const search_web = tool({
+    description: `当需要查询景点开放时间、官方订票链接、最新票价或实时资讯时调用。
+【重要】搜索欧洲景点票价时，请在query中包含"non-EU tourist price"或"international visitor price"，以避免返回本地居民优惠价。`,
+    parameters: z.object({
+      query: z.string().describe('搜索关键词，例如 "Louvre Museum non-EU tourist ticket price 2026"'),
+      context: z.string().optional().describe('搜索上下文，如用户身份信息'),
+    }),
+    execute: async ({ query, context }: { query: string; context?: string }) => {
+      console.log("[RAG] Searching:", query);
+      let enhancedQuery = query;
+      if (state.slots.originCity && detectMalaysianUser(state.slots.originCity)) {
+        if (query.toLowerCase().includes('price') || query.toLowerCase().includes('ticket') || query.toLowerCase().includes('票价')) {
+          enhancedQuery = `${query} non-EU tourist international visitor`;
+        }
+      }
+      const response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: process.env.TAVILY_API_KEY as string,
+          query: enhancedQuery,
+          include_answer: true,
+          max_results: 3
+        }),
+      });
+      const data = (await response.json()) as any;
+      const attractionMatch = query.match(/(louvre|versailles|eiffel|museum|博物馆|宫殿)/i);
+      if (attractionMatch && state.slots.originCity && detectMalaysianUser(state.slots.originCity)) {
+        return {
+          answer: data.answer,
+          results: data.results || [],
+          _priceNote: `⚠️ 价格提示：用户是马来西亚游客（非EEA公民），查询到的欧洲景点票价请使用非欧盟游客价格。`
+        };
+      }
+      return { answer: data.answer, results: data.results || [] };
+    },
+  } as any);
+
+  const search_flights_serpapi = tool({
+    description: `【严格限制】只有当出发城市和目的地都已确认时才能调用此工具。
+取得数据后请配合 show_flight_card 展示给用户。`,
+    parameters: z.object({
+      departure_id: z.string().describe('起飞机场三字代码'),
+      arrival_id: z.string().describe('降落机场三字代码'),
+      outbound_date: z.string().describe('出发日期 YYYY-MM-DD'),
+      return_date: z.string().optional().describe('返程日期 YYYY-MM-DD'),
+      currency: z.string().optional().describe('货币代码'),
+    }),
+    execute: async ({ departure_id, arrival_id, outbound_date, return_date, currency }: any) => {
+      if (!canSearchFlights(state)) {
+        return { error: `航班搜索被阻止：缺少必要信息`, hint: "请先使用 ask_user_preference 收集用户信息" };
+      }
+      const finalCurrency = currency || getCurrencyForOrigin(state.slots.originCity);
+      const params = new URLSearchParams({
+        engine: "google_flights",
+        departure_id, arrival_id, outbound_date, currency: finalCurrency,
+        hl: "zh-CN", api_key: process.env.SERPAPI_API_KEY as string
+      });
+      if (return_date) { params.append("type", "1"); params.append("return_date", return_date); } 
+      else { params.append("type", "2"); }
+
+      try {
+        const res = await fetch(`https://serpapi.com/search?${params.toString()}`);
+        const data = (await res.json()) as any;
+        if (!data.best_flights || data.best_flights.length === 0) return { error: "未找到匹配航班" };
+
+        const best_flights = data.best_flights.slice(0, 3).map((f: any) => ({
+          price: `${finalCurrency} ${f.price}`,
+          airlines: f.flights.map((fl: any) => fl.airline).join(", "),
+          departure: `${f.flights[0].departure_airport.id} ${f.flights[0].departure_airport.time}`,
+          arrival: `${f.flights[f.flights.length-1].arrival_airport.id} ${f.flights[f.flights.length-1].arrival_airport.time}`,
+          duration: `${Math.floor(f.total_duration / 60)}h ${f.total_duration % 60}m`,
+        }));
+        state.stage = 'planning';
+        sessionStates.set(sessionId, state);
+        return { success: true, data: best_flights, _stateUpdate: { stage: 'planning' } };
+      } catch (e: any) { return { error: e.message }; }
+    }
+  } as any);
+
+  const show_flight_card = tool({
+    description: '展示航班卡片。',
+    parameters: z.object({
+      airline: z.string(), flightNumber: z.string(), departure: z.string(),
+      arrival: z.string(), price: z.string(), duration: z.string(), bookingUrl: z.string(),
+    }),
+    execute: async () => ({ success: true })
+  } as any);
+
+  const show_ground_transport_card = tool({
+    description: '展示陆路交通。',
+    parameters: z.object({
+      transportType: z.enum(['bus', 'train', 'ferry', 'driving']), fromCity: z.string(),
+      toCity: z.string(), duration: z.string(), price: z.string(), tips: z.string(), bookingUrl: z.string(),
+    }),
+    execute: async () => ({ success: true })
+  } as any);
+
+  const confirm_slot = tool({
+    description: `登记用户偏好信息。`,
+    parameters: z.object({
+      slot_type: z.enum(['originCity', 'destination', 'tripDuration', 'travelStyle']),
+      value: z.string(),
+    }),
+    execute: async ({ slot_type, value }: any) => {
+      (state.slots as any)[slot_type] = value;
+      const slotNames: any = { originCity: '出发城市', destination: '目的地', tripDuration: '行程天数', travelStyle: '旅行风格' };
+      state.confirmations.push(`✓ ${slotNames[slot_type]}: ${value}`);
+      if (getMissingSlots(state).length === 0) state.stage = 'planning';
+      sessionStates.set(sessionId, state);
+      return { success: true, slotType: slot_type, value, currentState: state };
+    }
+  } as any);
+
+  // --- Routing Logic ---
+
+  let activeTools: any = {};
+  let finalSystemPrompt = baseSystemPrompt;
+
+  if (intent === 'travel_planning') {
+    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card };
+  } else if (intent === 'flight_inquiry') {
+    activeTools = { search_flights_serpapi, show_flight_card };
+    finalSystemPrompt += "\n【重点】用户当前正在咨询航班，请优先通过 search_flights_serpapi 获取实时数据。";
+  } else if (intent === 'out_of_scope') {
+    finalSystemPrompt = "你是一个专业的旅游顾问。用户问了一个超出你服务范围的问题（如编程、数学、医疗）。请礼貌地拒绝，并引导用户回到旅游规划的话题上。";
+  } else {
+    activeTools = {}; // general_chat
+    finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
+  }
 
   const result = await streamText({
     model: ollama("qwen3.5:cloud"),
     messages: sanitizedMessages,
-    system: systemPrompt,
-    //限制最大步数防止无限循环重复，允许充足迭代
+    system: finalSystemPrompt,
     maxSteps: 10,
-    //设置足够的最大生成长度，防止回答中途截断
     maxTokens: 4096,
-    tools: {
-      // 收集用户偏好（核心工具）
-      ask_user_preference: tool({
-        description: `当需要向用户询问偏好并期望用户在选项中做选择时调用。
-【极其重要】在信息收集阶段，必须通过此工具询问用户，禁止在普通文本中再次列出选项！
-【核心约束】绝对禁止在同一次回复中生成多个 ask_user_preference 调用。每次只能询问一个未确认的信息！`,
-        parameters: z.object({
-          question: z.string().describe('你想问用户的问题（不要包含选项），例如 "您计划在巴黎停留多少天？"'),
-          options: z.array(z.string()).describe('提供给用户的具体选项数组，例如 ["3-5天", "6-8天", "一周以上"]（最多4个）'),
-          slot_type: z.enum(['originCity', 'destination', 'tripDuration', 'travelStyle']).optional()
-            .describe('此问题对应的槽位类型，用于状态追踪'),
-        }),
-      }),
-
-      // 网络搜索（带价格推理）
-      search_web: tool({
-        description: `当需要查询景点开放时间、官方订票链接、最新票价或实时资讯时调用。
-【重要】搜索欧洲景点票价时，请在query中包含"non-EU tourist price"或"international visitor price"，
-以避免返回本地居民优惠价。`,
-        parameters: z.object({
-          query: z.string().describe('搜索关键词，例如 "Louvre Museum non-EU tourist ticket price 2026"'),
-          context: z.string().optional().describe('搜索上下文，如用户身份信息'),
-        }),
-        execute: async ({ query, context }: { query: string; context?: string }) => {
-          console.log("[RAG] Searching:", query);
-
-          // 如果是票价查询，注入价格上下文
-          let enhancedQuery = query;
-          if (state.slots.originCity && detectMalaysianUser(state.slots.originCity)) {
-            // 为马来西亚用户增强查询
-            if (query.toLowerCase().includes('price') || query.toLowerCase().includes('ticket') || query.toLowerCase().includes('票价')) {
-              enhancedQuery = `${query} non-EU tourist international visitor`;
-            }
-          }
-
-          const response = await fetch("https://api.tavily.com/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              api_key: process.env.TAVILY_API_KEY as string,
-              query: enhancedQuery,
-              include_answer: true,
-              include_raw_content: false,
-              include_domains: [],
-              max_results: 3
-            }),
-          });
-          const data = (await response.json()) as any;
-
-          // 价格验证（如果检测到景点名称）
-          const attractionMatch = query.match(/(louvre|versailles|eiffel|museum|博物馆|宫殿)/i);
-          if (attractionMatch && state.slots.originCity) {
-            const isMalaysian = detectMalaysianUser(state.slots.originCity);
-            if (isMalaysian) {
-              return {
-                answer: data.answer,
-                results: data.results || [],
-                _priceNote: `⚠️ 价格提示：用户是马来西亚游客（非EEA公民），查询到的欧洲景点票价请使用非欧盟游客价格。`
-              };
-            }
-          }
-
-          return {
-            answer: data.answer,
-            results: data.results || []
-          };
-        },
-      } as any),
-
-      // 航班搜索（带状态检查）
-      search_flights_serpapi: tool({
-        description: `【严格限制】只有当出发城市和目的地都已确认时才能调用此工具。
-调用前必须确认：originCity=${state.slots.originCity || '未确认'}, destination=${state.slots.destination || '未确认'}
-取得数据后请配合 show_flight_card 展示给用户。`,
-        parameters: z.object({
-          departure_id: z.string().describe('起飞机场三字代码，例如吉隆坡 "KUL"'),
-          arrival_id: z.string().describe('降落机场三字代码，例如巴黎 "CDG"'),
-          outbound_date: z.string().describe('出发日期，格式 YYYY-MM-DD。若用户未指定具体日期，请默认填入两周后的日期。'),
-          return_date: z.string().optional().describe('返程日期，格式 YYYY-MM-DD，单程则不填'),
-          currency: z.string().optional().describe('查询货币代码，如 "MYR", "USD"'),
-        }),
-        execute: async ({ departure_id, arrival_id, outbound_date, return_date, currency }: any) => {
-          // 状态检查：是否允许调用
-          if (!canSearchFlights(state)) {
-            const missing = getMissingSlots(state);
-            return {
-              error: `航班搜索被阻止：缺少必要信息 - ${missing.join(', ')}`,
-              hint: "请先使用 ask_user_preference 收集用户信息"
-            };
-          }
-
-          // 货币自动推断
-          const finalCurrency = currency || getCurrencyForOrigin(state.slots.originCity);
-
-          console.log(`[Flight] Searching: ${departure_id} -> ${arrival_id} on ${outbound_date} (${finalCurrency})`);
-
-          const params = new URLSearchParams({
-            engine: "google_flights",
-            departure_id,
-            arrival_id,
-            outbound_date,
-            currency: finalCurrency,
-            hl: "zh-CN",
-            api_key: process.env.SERPAPI_API_KEY as string
-          });
-
-          if (return_date) {
-            params.append("type", "1");
-            params.append("return_date", return_date);
-          } else {
-            params.append("type", "2");
-          }
-
-          try {
-            const res = await fetch(`https://serpapi.com/search?${params.toString()}`);
-            const data = (await res.json()) as any;
-
-            if (!data.best_flights || data.best_flights.length === 0) {
-              return { error: "未找到该日期的匹配航班，请尝试其他出入境日期或机场枢纽。" };
-            }
-
-            // 精简数据
-            const best_flights = data.best_flights.slice(0, 3).map((f: any) => {
-              const depTime = f.flights[0].departure_airport.time?.split(" ")[1] || f.flights[0].departure_airport.time;
-              const arrTime = f.flights[f.flights.length-1].arrival_airport.time?.split(" ")[1] || f.flights[f.flights.length-1].arrival_airport.time;
-              return {
-                price: `${finalCurrency} ${f.price}`,
-                airlines: f.flights.map((fl: any) => fl.airline).join(", "),
-                flightNumbers: f.flights.map((fl: any) => fl.flight_number).join(", "),
-                departure: `${f.flights[0].departure_airport.id} ${depTime}`,
-                arrival: `${f.flights[f.flights.length-1].arrival_airport.id} ${arrTime}`,
-                total_duration: `${Math.floor(f.total_duration / 60)}h ${f.total_duration % 60}m`,
-                layovers: f.layovers ? f.layovers.map((l: any) => l.name).join(", ") : "直飞"
-              };
-            });
-
-            // 更新状态：已执行航班搜索
-            state.stage = 'planning';
-            sessionStates.set(sessionId, state);
-
-            return {
-              success: true,
-              data: best_flights,
-              note: "已获取到航班真实数据！请用此数据调用 show_flight_card 渲染推荐。",
-              _stateUpdate: { stage: 'planning' }
-            };
-          } catch (e: any) {
-            return { error: e.message };
-          }
-        }
-      } as any),
-
-      // 航班卡片展示
-      show_flight_card: tool({
-        description: '当找到真实航班信息并向用户推荐时必须调用此工具。前端将渲染精美卡片。',
-        parameters: z.object({
-          airline: z.string().describe("航空公司名称，例如 'Turkish Airlines'"),
-          flightNumber: z.string().describe("航班号，如 'TK 123'，或概括填 '转机'"),
-          departure: z.string().describe("起飞城市及时间：例如 '吉隆坡 10:00'"),
-          arrival: z.string().describe("降落城市及时间：例如 '巴黎 18:00'"),
-          price: z.string().describe("价格估算（带货币），例如 'MYR 2,500'"),
-          duration: z.string().describe("总飞行及转机耗时，例如 '14h 30m'"),
-          bookingUrl: z.string().describe("官方或OTA订票链接，没有填 '#'"),
-        }),
-        execute: async () => {
-          return { success: true, message: "Flight UI rendered" };
-        }
-      } as any),
-
-      // 陆路交通卡片
-      show_ground_transport_card: tool({
-        description: '当出发地与目的地距离较近（<300km）时调用此工具展示陆路交通。',
-        parameters: z.object({
-          transportType: z.enum(['bus', 'train', 'ferry', 'driving']).describe("交通类型"),
-          fromCity: z.string().describe("出发城市"),
-          toCity: z.string().describe("目的地城市"),
-          duration: z.string().describe("预计耗时"),
-          price: z.string().describe("价格范围"),
-          tips: z.string().describe("出行小贴士"),
-          bookingUrl: z.string().describe("购票链接，没有填 '#'"),
-        }),
-        execute: async () => {
-          return { success: true, message: "Ground transport UI rendered" };
-        }
-      } as any),
-
-      // 确认槽位（用于用户选择后更新状态）
-      confirm_slot: tool({
-        description: `当用户在对话中提供了明确的偏好信息（如出发地、目的地、天数、风格）后，必须调用此工具将信息登记到后台系统中。
-【注意】登记成功后，系统会推进状态，你可以再调用 ask_user_preference 询问下一个缺失的信息。可以伴随一句简短的反馈。`,
-        parameters: z.object({
-          slot_type: z.enum(['originCity', 'destination', 'tripDuration', 'travelStyle']),
-          value: z.string().describe('用户选择的值'),
-        }),
-        execute: async ({ slot_type, value }: any) => {
-          // 更新状态
-          (state.slots as any)[slot_type] = value;
-
-          // 记录确认历史
-          const slotNames: Record<string, string> = {
-            originCity: '出发城市',
-            destination: '目的地',
-            tripDuration: '行程天数',
-            travelStyle: '旅行风格',
-          };
-          state.confirmations.push(`✓ ${slotNames[slot_type]}: ${value}`);
-
-          // 检查是否可以进入下一阶段
-          if (getMissingSlots(state).length === 0) {
-            state.stage = 'planning';
-          }
-
-          sessionStates.set(sessionId, state);
-          console.log(`[DST] Slot confirmed: ${slot_type} = ${value}, stage = ${state.stage}`);
-
-          return { success: true, slotType: slot_type, value, currentState: state };
-        }
-      } as any),
-    },
+    tools: activeTools,
   });
 
   return result.toDataStreamResponse();
