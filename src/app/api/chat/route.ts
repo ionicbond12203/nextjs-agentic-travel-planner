@@ -133,13 +133,14 @@ export async function POST(req: Request) {
     execute: async ({ query, verification_target, context }: { query: string; verification_target?: string; context?: string }) => {
       console.log("[RAG] Searching:", query, "Target:", verification_target);
       
-      // 增强搜索词：强制包含 2026 和 官方/最新 关键词
+      // 净化搜索词：避免塞入诱导性、假设性词汇（如 mandatory fee, 涨价）导致搜索引擎和 LLM 出现幻觉
       let enhancedQuery = query;
       if (!query.includes('2026')) enhancedQuery += ' 2026';
-      if (!query.match(/official|官方|预订|booking/i)) enhancedQuery += ' official latest';
-      if (verification_target === 'TICKET_POLICY_FOR_FOREIGNERS') enhancedQuery += ' fee mandatory international tourist';
-      if (verification_target === 'BOOKING_AND_NAVIGATION') enhancedQuery += ' booking url Google Maps address open status';
-      if (verification_target === 'NUMERICAL_ENTITY_CHECK') enhancedQuery += ' exact price cost ticket pass';
+      if (!query.match(/official|官方/i)) enhancedQuery += ' official';
+      
+      // 仅保留中性的意图后缀，严禁加入 "fee/mandatory/tourist" 等暗示性词汇
+      if (verification_target === 'BOOKING_AND_NAVIGATION') enhancedQuery += ' booking url location open status';
+      if (verification_target === 'NUMERICAL_ENTITY_CHECK') enhancedQuery += ' exact price ticket';
 
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
@@ -154,11 +155,11 @@ export async function POST(req: Request) {
       });
       const data = (await response.json()) as any;
       
-      // 增加时效性提示标签，强制模型感知
+      // 添加极其严厉的反幻觉防穿透补丁
       const resultMessage = {
         answer: data.answer,
         results: data.results || [],
-        recencyNote: `重要：检索结果已包含 2026 年最新资讯。若结果显示价格上涨或政策变动，请以此为准。`
+        recencyNote: `【关键防幻觉约束】请严格字面地基于上述返回结果回答！如果搜索结果中【没有】白纸黑字写明 2026 年针对外国游客涨价，或者只提及了过去的政策，你【必须】老实回答：“目前暂无 2026 年新政，参考当前票价为 [X]”。绝不允许为了迎合用户的提问去捏造涨价比例或莫须有的附加费！！！`
       };
 
       return resultMessage;
@@ -315,16 +316,26 @@ export async function POST(req: Request) {
     activeTools = {}; // Only chat
     finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
   } else {
-    // Basic travel tools
+    // 基础核心工具始终注入
     activeTools = { 
       ask_user_preference, 
-      search_web, 
-      search_hotels,
       confirm_slot, 
-      show_ground_transport_card, 
       show_map,
-      show_hotel_carousel
     };
+    
+    // 动态路由：判断是否为跟团游
+    const isGroupTour = state.slots.travelStyle && state.slots.travelStyle.includes('跟团');
+    
+    if (isGroupTour) {
+      // 跟团游：只需通用搜索即可（重点搜 Tour Package），剥夺 DIY 工具
+      activeTools.search_web = search_web;
+    } else {
+      // 自由行：全量注入酒店、交通卡片等 DIY 工具
+      activeTools.search_web = search_web;
+      activeTools.search_hotels = search_hotels;
+      activeTools.show_ground_transport_card = show_ground_transport_card;
+      activeTools.show_hotel_carousel = show_hotel_carousel;
+    }
     
     // [Fix: Path to Flight Search] Use state-based injection instead of intent-locking
     if (canSearchFlights(state)) {
