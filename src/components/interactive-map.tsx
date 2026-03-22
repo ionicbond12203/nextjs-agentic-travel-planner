@@ -1,9 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useMemo } from "react";
 import dynamic from "next/dynamic";
-// Local CSS import is more reliable in Next.js
-import "leaflet/dist/leaflet.css";
 
 interface Location {
   lat: number;
@@ -19,100 +17,65 @@ interface InteractiveMapProps {
   markers: Location[];
 }
 
-// Internal component that uses Leaflet hooks
-// This will only be rendered on the client thanks to the dynamic wrapper below
-const LeafletMapInner: React.FC<InteractiveMapProps> = ({
-  center,
-  zoom = 13,
-  markers,
-}) => {
-  const { MapContainer, TileLayer, Marker, Popup, useMap } = require("react-leaflet");
-  const L = require("leaflet");
-
-  // Fix Leaflet marker icon issue
-  const customIcon = L.divIcon({
-    html: `<div style="background-color: var(--color-accent); width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>`,
-    className: "custom-div-icon",
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-  });
-
-  function ChangeView({ center, zoom }: { center: [number, number], zoom: number }) {
-    const map = useMap();
-    useEffect(() => {
-      if (map) {
-        // Essential fix for misaligned tiles in dynamic containers
-        setTimeout(() => {
-          map.invalidateSize();
-          map.setView(center, zoom);
-        }, 100);
-      }
-    }, [center, zoom, map]);
-    return null;
-  }
-
-  const mapCenter: [number, number] = center 
-    ? [center.lat, center.lng] 
-    : markers.length > 0 
-      ? [markers[0].lat, markers[0].lng] 
-      : [48.8566, 2.3522];
-
-  return (
-    <div className="h-[350px] w-full">
-      <MapContainer
-        center={mapCenter}
-        zoom={zoom}
-        scrollWheelZoom={false}
-        style={{ height: "100%", width: "100%" }}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        />
-        
-        <ChangeView center={mapCenter} zoom={zoom} />
-
-        {markers.map((marker, idx) => (
-          <Marker 
-            key={`${marker.lat}-${marker.lng}-${idx}`} 
-            position={[marker.lat, marker.lng]}
-            icon={customIcon}
-          >
-            <Popup>
-              <div className="p-1">
-                <h4 className="font-bold text-slate-800">{marker.label}</h4>
-                {marker.description && <p className="text-xs text-slate-600 mt-1">{marker.description}</p>}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+// 1. Refactor: Use top-level next/dynamic with ssr: false
+// This eliminates the need for manual 'mounted' state or 'require' hacks.
+const DynamicMapInner = dynamic(() => import("./map-inner"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[350px] w-full bg-surface-hover animate-pulse rounded-xl flex items-center justify-center text-muted text-sm">
+      地图加载中...
     </div>
-  );
-};
+  ),
+});
 
-// The actual exported component that is safe to use in Next.js
-const InteractiveMap: React.FC<InteractiveMapProps> = (props) => {
-  const [mounted, setMounted] = useState(false);
+// 2. Refactor: Use React.memo to prevent expensive history re-renders
+const InteractiveMap: React.FC<InteractiveMapProps> = React.memo(({
+  title,
+  center,
+  zoom,
+  markers = [],
+}) => {
+  // 3. Refactor: Defensive Validation
+  // Ensure we don't crash if LLM sends malformed coordinates or empty markers
+  const validatedMarkers = useMemo(() => {
+    return Array.isArray(markers) 
+      ? markers.filter(m => 
+          typeof m.lat === 'number' && 
+          typeof m.lng === 'number' && 
+          !isNaN(m.lat) && !isNaN(m.lng)
+        ).map(m => ({
+          ...m,
+          label: m.label || "未命名地点"
+        }))
+      : [];
+  }, [markers]);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return <div className="h-[350px] w-full bg-surface-hover animate-pulse rounded-xl" />;
+  // If no valid data, don't render the empty shell
+  if (validatedMarkers.length === 0 && !center) {
+    return (
+      <div className="my-2 p-4 border border-border rounded-xl bg-surface-hover text-sm text-balance">
+        ⚠️ 地图数据异常，无法显示位置。
+      </div>
+    );
   }
 
   return (
     <div className="my-4 overflow-hidden rounded-xl border border-border bg-surface shadow-lg animate-fade-in">
-      {props.title && (
+      {title && (
         <div className="border-b border-border bg-surface-hover px-4 py-2 text-sm font-semibold text-strong">
-          📍 {props.title}
+          📍 {title}
         </div>
       )}
-      <LeafletMapInner {...props} />
+      <DynamicMapInner 
+        center={center} 
+        zoom={zoom} 
+        markers={validatedMarkers} 
+      />
     </div>
   );
-};
+});
+
+// Set display name for debugging
+InteractiveMap.displayName = "InteractiveMap";
 
 export default InteractiveMap;

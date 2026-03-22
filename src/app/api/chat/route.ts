@@ -47,7 +47,7 @@ function getFastIntent(message: string, state: DialogueState): string | null {
   }
 
   // 3. Stage-based Routing
-  if (state.stage === 'collecting' && (content.includes('天') || content.includes('风格') || content.includes('去'))) {
+  if (state.stage === 'collecting' && (content.includes('天') || content.includes('风格') || content.includes('去') || content.length < 10)) {
     return 'travel_planning';
   }
 
@@ -124,27 +124,34 @@ export async function POST(req: Request) {
   });
 
   // [Optimization: Hybrid Routing & Parallelization]
-  const lastMsgContent = sanitizedMessages[sanitizedMessages.length - 1].content || "";
+  const lastMsg = sanitizedMessages[sanitizedMessages.length - 1];
+  const lastMsgContent = lastMsg.content || "";
   let intent: string;
   let safety = { safe: true, message: "" };
 
-  const fastIntent = getFastIntent(lastMsgContent, state);
-  if (fastIntent) {
-    console.log("[Optimization] Fast-routing matched:", fastIntent);
-    intent = fastIntent;
+  // [Fast Path] If the last message is a tool result from our preference collection, bypass LLM
+  if (lastMsg.role === 'tool' && (lastMsg.toolName === 'ask_user_preference' || lastMsg.toolName === 'confirm_slot')) {
+    console.log("[Optimization] Tool result detected, bypassing Analyzer.");
+    intent = 'travel_planning';
   } else {
-    const analysis = await analyzeRequest(sanitizedMessages);
-    intent = analysis.intent;
-    safety = { safe: analysis.safe, message: analysis.message || "" };
-    
-    // [Refactor: Centralized Slot Update]
-    if (analysis.slots && intent !== 'out_of_scope') {
-      Object.entries(analysis.slots).forEach(([k, v]) => {
-        if (v && !(state.slots as any)[k]) {
-          (state.slots as any)[k] = v;
-          if (k === 'originCity') state.slots.currency = getCurrencyForOrigin(v);
-        }
-      });
+    const fastIntent = getFastIntent(lastMsgContent, state);
+    if (fastIntent) {
+      console.log("[Optimization] Fast-routing matched:", fastIntent);
+      intent = fastIntent;
+    } else {
+      const analysis = await analyzeRequest(sanitizedMessages);
+      intent = analysis.intent;
+      safety = { safe: analysis.safe, message: analysis.message || "" };
+      
+      // [Refactor: Centralized Slot Update]
+      if (analysis.slots && intent !== 'out_of_scope') {
+        Object.entries(analysis.slots).forEach(([k, v]) => {
+          if (v && !(state.slots as any)[k]) {
+            (state.slots as any)[k] = v;
+            if (k === 'originCity') state.slots.currency = getCurrencyForOrigin(v);
+          }
+        });
+      }
     }
   }
 
