@@ -104,29 +104,8 @@ async function analyzeRequest(messages: any[]): Promise<{
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  // 提取原始数据并转换为对 LLM 友好的格式
-  const sanitizedMessages: any[] = [];
-  for (const m of messages) {
-    if (m.role === 'assistant' && m.toolInvocations) {
-      const newMsg = { ...m };
-      const askPrefTools = newMsg.toolInvocations.filter((t: any) => t.toolName === 'ask_user_preference' && t.state === 'result');
-      const otherTools = newMsg.toolInvocations.filter((t: any) => !(t.toolName === 'ask_user_preference' && t.state === 'result'));
-      
-      newMsg.toolInvocations = otherTools;
-      if (newMsg.toolInvocations.length === 0) delete newMsg.toolInvocations;
-      if (!newMsg.content && (!newMsg.toolInvocations || newMsg.toolInvocations.length === 0)) {
-        newMsg.content = "让我确认一下您的偏好和信息。";
-      }
-      if (newMsg.content || newMsg.toolInvocations) sanitizedMessages.push(newMsg);
-      
-      if (askPrefTools.length > 0) {
-        const answers = askPrefTools.map((t: any) => `我选择的内容是：${t.result}`).join('\n');
-        sanitizedMessages.push({ role: 'user', content: answers });
-      }
-    } else {
-      sanitizedMessages.push(m);
-    }
-  }
+  // [Refactor: SDK Compliance] Use raw messages but shallow copy for safety
+  const sanitizedMessages = messages.map((m: any) => ({ ...m }));
 
   const sessionId = getSessionId(req);
   let state = sessionStates.get(sessionId) || initDialogueState();
@@ -134,6 +113,7 @@ export async function POST(req: Request) {
   const currentDateTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const currentYear = new Date().getFullYear();
 
+  // Use the legacy extractor ONLY for tool result reconciliation
   state = extractStateFromToolResults(messages, state);
 
   const baseSystemPrompt = buildSystemPrompt({
@@ -144,7 +124,7 @@ export async function POST(req: Request) {
   });
 
   // [Optimization: Hybrid Routing & Parallelization]
-  const lastMsgContent = sanitizedMessages[sanitizedMessages.length - 1].content;
+  const lastMsgContent = sanitizedMessages[sanitizedMessages.length - 1].content || "";
   let intent: string;
   let safety = { safe: true, message: "" };
 
@@ -171,9 +151,6 @@ export async function POST(req: Request) {
   if (!safety.safe) {
     return new Response(JSON.stringify({ error: safety.message }), { status: 403 });
   }
-
-  // Use the legacy extractor ONLY for tool result reconciliation
-  state = extractStateFromToolResults(messages, state);
 
   // --- Tool Definitions ---
 
@@ -296,21 +273,28 @@ export async function POST(req: Request) {
     }
   } as any);
 
-  // --- Routing Logic ---
+  // --- Routing & Tool Injection Logic ---
 
   let activeTools: any = {};
   let finalSystemPrompt = baseSystemPrompt;
 
-  if (intent === 'travel_planning') {
-    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card };
-  } else if (intent === 'flight_inquiry') {
-    activeTools = { search_flights_serpapi, show_flight_card };
-    finalSystemPrompt += "\n【重点】用户当前正在咨询航班，请优先通过 search_flights_serpapi 获取实时数据。";
-  } else if (intent === 'out_of_scope') {
+  if (intent === 'out_of_scope') {
     finalSystemPrompt = "你是一个专业的旅游顾问。用户问了一个超出你服务范围的问题（如编程、数学、医疗）。请礼貌地拒绝，并引导用户回到旅游规划的话题上。";
-  } else {
-    activeTools = {}; // general_chat
+  } else if (intent === 'general_chat') {
+    activeTools = {}; // Only chat
     finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
+  } else {
+    // Basic travel tools
+    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card };
+    
+    // [Fix: Path to Flight Search] Use state-based injection instead of intent-locking
+    if (canSearchFlights(state)) {
+      activeTools.search_flights_serpapi = search_flights_serpapi;
+      activeTools.show_flight_card = show_flight_card;
+      finalSystemPrompt += "\n【航班查询已解锁】如果用户同意或主动要求查询航班，请立即调用 search_flights_serpapi 获取实时数据。";
+    }
+    
+    finalSystemPrompt += "\n【严格约束】收到用户的偏好选择（如来自 ask_user_preference 的结果）后，必须立即执行 confirm_slot 记录，绝不允许重复询问同一个问题！";
   }
 
   const result = await streamText({
