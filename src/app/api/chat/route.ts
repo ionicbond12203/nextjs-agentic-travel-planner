@@ -262,6 +262,25 @@ export async function POST(req: Request) {
     execute: async () => ({ success: true })
   } as any);
 
+  const show_map = tool({
+    description: '展示交互式地图，标注景点、酒店或交通路线。',
+    parameters: z.object({
+      title: z.string().describe('地图标题'),
+      center: z.object({
+        lat: z.number(),
+        lng: z.number(),
+      }).optional().describe('地图中心点，如果不提供则根据 markers 自动计算'),
+      zoom: z.number().optional().default(13),
+      markers: z.array(z.object({
+        lat: z.number(),
+        lng: z.number(),
+        label: z.string().describe('标注名称'),
+        description: z.string().optional().describe('标注描述'),
+      })).describe('需要在地图上标注的点'),
+    }),
+    execute: async () => ({ success: true })
+  } as any);
+
   const confirm_slot = tool({
     description: `登记用户偏好信息。`,
     parameters: z.object({
@@ -285,7 +304,7 @@ export async function POST(req: Request) {
     finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
   } else {
     // Basic travel tools
-    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card };
+    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card, show_map };
     
     // [Fix: Path to Flight Search] Use state-based injection instead of intent-locking
     if (canSearchFlights(state)) {

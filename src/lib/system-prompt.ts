@@ -56,6 +56,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 使用专用卡片工具展示：
 - show_flight_card：展示航班推荐
 - show_ground_transport_card：展示陆路交通推荐
+- show_map：展示交互式地图，标注景点、酒店或关键地理位置。当用户询问具体位置或需要可视化行程时调用。
 `;
 
   // 状态上下文
