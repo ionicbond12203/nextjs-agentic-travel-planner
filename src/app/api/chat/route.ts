@@ -124,16 +124,19 @@ export async function POST(req: Request) {
     description: `当需要查询景点开放时间、官方订票链接、最新票价或实时资讯时调用。
 【重要】搜索欧洲景点票价时，请在query中包含"non-EU tourist price"或"international visitor price"，以避免返回本地居民优惠价。`,
     parameters: z.object({
-      query: z.string().describe('搜索关键词，例如 "Louvre Museum non-EU tourist ticket price 2026"'),
+      query: z.string().describe('搜索关键词，例如 "The Met museum international visitor ticket price 2026 mandatory"'),
+      verification_target: z.enum(['TICKET_POLICY_FOR_FOREIGNERS', 'BUSINESS_OPERATING_STATUS', 'GENERAL_INFO']).optional()
+        .describe('你正在核查的目标。查询票价时必须选 TICKET_POLICY_FOR_FOREIGNERS，查询景点是否关门选 BUSINESS_OPERATING_STATUS'),
       context: z.string().optional().describe('搜索上下文，如用户身份信息'),
     }),
-    execute: async ({ query, context }: { query: string; context?: string }) => {
-      console.log("[RAG] Searching:", query);
+    execute: async ({ query, verification_target, context }: { query: string; verification_target?: string; context?: string }) => {
+      console.log("[RAG] Searching:", query, "Target:", verification_target);
       
       // 增强搜索词：强制包含 2026 和 官方/最新 关键词
       let enhancedQuery = query;
       if (!query.includes('2026')) enhancedQuery += ' 2026';
       if (!query.includes('official') && !query.includes('官方')) enhancedQuery += ' official latest';
+      if (verification_target === 'TICKET_POLICY_FOR_FOREIGNERS') enhancedQuery += ' fee mandatory international tourist';
 
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
@@ -155,6 +158,40 @@ export async function POST(req: Request) {
       };
 
       return resultMessage;
+    },
+  } as any);
+
+  const search_hotels = tool({
+    description: `当需要搜索、推荐酒店或查询住宿时调用。
+【致命约束】必须同时提供具体的入住日期，并查询其在您出行期间的营业状态（是正常营业、停业翻新还是被征用等），切勿推荐暂时歇业的酒店。`,
+    parameters: z.object({
+      location: z.string().describe('搜索的目的地或区域，例如 "纽约曼哈顿 Times Square"'),
+      check_in_date: z.string().describe('具体的出行入住日期，格式 YYYY-MM-DD，用于时序校验'),
+      require_status: z.enum(['CONFIRMED_OPEN', 'UNKNOWN']).describe('必须填入 CONFIRMED_OPEN 以确认营业状态'),
+      budget_category: z.string().optional().describe('预算类别，如"舒适型"、"奢华型"'),
+    }),
+    execute: async ({ location, check_in_date, require_status, budget_category }: any) => {
+      console.log("[RAG/Hotel] Searching:", location, "Date:", check_in_date, "Status:", require_status);
+      
+      const query = `${location} hotel ${budget_category || ''} open status ${check_in_date.substring(0,4)} news`;
+      
+      const response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: process.env.TAVILY_API_KEY as string,
+          query: query,
+          include_answer: true,
+          max_results: 3
+        }),
+      });
+      const data = (await response.json()) as any;
+      
+      return {
+        answer: data.answer,
+        results: data.results || [],
+        verificationNote: `重要核查：请仔细阅读上述搜索结果，确认该酒店在 ${check_in_date} 确实对公众正式营业。如果是被征用、正在翻修、计划延期开业，请**绝对禁止**向用户推荐查无开业状态的酒店！`
+      };
     },
   } as any);
 
@@ -277,6 +314,7 @@ export async function POST(req: Request) {
     activeTools = { 
       ask_user_preference, 
       search_web, 
+      search_hotels,
       confirm_slot, 
       show_ground_transport_card, 
       show_map,

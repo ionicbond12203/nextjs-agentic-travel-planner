@@ -53,9 +53,10 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 1. **先核查，后规划**：必须先调用 search_web 查询目的地 2026 年最新的交通票券（如 PASS）、景点开放时间及针对外国游客的准确票价。
 2. **拒绝陈旧知识**：如果你的记忆（如 JR Pass 价格）与 2026 年搜索结果冲突，**必须以搜索结果为准**。
 3. **调用 API**：
+   - search_hotels：查询酒店并核查真实营业状态（必须提供 check_in_date）
    - search_flights_serpapi：查询航班
    - search_web：查询票价、资讯、评价
-
+   
 ### 【阶段三：方案展示】
 使用专用卡片工具展示：
 - show_flight_card：展示航班推荐
@@ -91,13 +92,17 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 
   const ragConstraint = !isLocal
     ? `
-## ⚠️ RAG检索约束（非本地/跨国游客）
-用户是跨国游客。在搜索景点、交通票务时：
-1. **核查差价**：必须专门检索是否有“Foreign Tourist”或“Non-Resident”专用价格。
-2. **拒绝本地优惠**：禁止使用仅限当地居民、学生或EEA公民的优惠价（如卢浮宫的€22优惠价）。
-3. **时效性校验**：所有价格必须带有 2026 年的时间戳标记。
+## ⚠️ RAG检索约束与事实核查（非本地/跨国游客）
+用户是跨国游客。在搜索景点、交通票务时，必须越过模型历史记忆：
+1. **警惕政策幻觉**：很多著名景点（如纽约大都会博物馆 The Met、卢浮宫等）的免费或“自愿捐款”政策早已对外国游客废除。
+2. **核查强制收费**：必须通过 search_web专门检索是否有“Mandatory fee for international visitors”或最新的针对外国人的政策。
+3. **拒绝本地优惠**：禁止使用仅限当地居民、学生或EEA公民的优惠价。
+4. **实体营业校验**：在推荐任何住宿时，必须通过 \`search_hotels\` 确认在出行日期（如 ${futureDate}）期间的 \`is_open\`（营业状态）。绝对禁止推荐将被征用、正在翻修或暂停营业的实体！
 `
-    : '';
+    : `
+## ⚠️ 实体营业校验（本地游客）
+在推荐任何住宿时，必须通过 \`search_hotels\` 确认在出行日期（如 ${futureDate}）期间的 \`is_open\`（营业状态）。绝对禁止推荐将被征用、正在翻修或暂停营业的实体！
+`;
 
   // 汇率与计算规则
   const mathRule = `
