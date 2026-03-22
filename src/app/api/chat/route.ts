@@ -148,7 +148,8 @@ export async function POST(req: Request) {
           api_key: process.env.TAVILY_API_KEY as string,
           query: enhancedQuery,
           include_answer: true,
-          max_results: 3
+          max_results: 3,
+          days: 180 // 【Freshness Prioritization】过滤半年前的旧数据，避免票价幻觉
         }),
       });
       const data = (await response.json()) as any;
@@ -185,7 +186,8 @@ export async function POST(req: Request) {
           api_key: process.env.TAVILY_API_KEY as string,
           query: query,
           include_answer: true,
-          max_results: 3
+          max_results: 3,
+          days: 180 // 同样保持酒店资讯的新鲜度
         }),
       });
       const data = (await response.json()) as any;
