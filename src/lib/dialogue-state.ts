@@ -32,6 +32,8 @@ export interface DialogueState {
   confirmations: string[];
   /** 待确认的槽位 */
   pendingSlots: string[];
+  /** 上次处理的消息索引，用于增量解析状态 */
+  lastProcessedIndex: number;
 }
 
 /** 马来西亚主要机场城市 */
@@ -92,6 +94,7 @@ export function initDialogueState(): DialogueState {
     },
     confirmations: [],
     pendingSlots: ['originCity', 'destination', 'tripDuration', 'travelStyle'],
+    lastProcessedIndex: 0,
   };
 }
 

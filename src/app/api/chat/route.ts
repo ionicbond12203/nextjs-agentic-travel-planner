@@ -12,9 +12,10 @@ import {
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { getCorrectPrice, validatePrice } from "@/lib/price-inference";
 
-// 对话状态存储（简化版：基于会话ID）
-// 生产环境应使用 Redis 或数据库
-const sessionStates = new Map<string, DialogueState>();
+import { getSession, setSession } from "@/lib/redis";
+
+// 移除内存存储，改用 Redis
+// const sessionStates = new Map<string, DialogueState>();
 
 // 使用官方的 OpenAI Provider 连接到 Ollama 的本地兼容接口
 const ollama = createOpenAI({
@@ -51,55 +52,16 @@ function getFastIntent(message: string, state: DialogueState): string | null {
     return 'travel_planning';
   }
 
+  // 4. Safety Guard (Fast Check)
+  if (/(暴力|色情|毒品|自杀|枪支|炸药|非法|赌博|vpn|翻墙)/i.test(content)) {
+    return 'out_of_scope';
+  }
+
   return null;
 }
 
-/**
- * [Workflow: Consolidator] Single LLM call for Intent + Guardrails + Slot Extraction
- */
-async function analyzeRequest(messages: any[]): Promise<{ 
-  intent: string; 
-  safe: boolean; 
-  message?: string;
-  slots: { originCity?: string; destination?: string; tripDuration?: string; travelStyle?: string }
-}> {
-  const lastMessage = messages[messages.length - 1].content;
-  if (typeof lastMessage !== 'string') return { intent: 'travel_planning', safe: true, slots: {} };
-
-  console.log("[Optimization] Calling Super Analyzer...");
-  try {
-    const { text } = await generateText({
-      model: ollama("qwen3.5:cloud"),
-      system: `You are a travel assistant analyzer.
-      Analyze the user input and respond in JSON format:
-      {
-        "intent": "travel_planning" | "flight_inquiry" | "general_chat" | "out_of_scope",
-        "safe": boolean,
-        "violation_reason": string | null,
-        "extracted_slots": {
-           "originCity": "3-letter airport code if mentioned",
-           "destination": "City name if mentioned",
-           "tripDuration": "Duration if mentioned",
-           "travelStyle": "Style if mentioned"
-        }
-      }
-      Safety: Block dangerous/illegal prompts.
-      Intents: travel_planning (trip advice/slots), flight_inquiry (flights), general_chat (small talk), out_of_scope (unrelated).`,
-      prompt: lastMessage,
-    });
-    
-    const result = JSON.parse(text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1));
-    return {
-      intent: result.intent || 'travel_planning',
-      safe: result.safe !== false,
-      message: result.violation_reason || "抱歉，您的请求超出服务范围。",
-      slots: result.extracted_slots || {}
-    };
-  } catch (e) {
-    console.error("[Optimization] Analysis failed.");
-    return { intent: 'travel_planning', safe: true, slots: {} };
-  }
-}
+// 🛑 [REMOVED] analyzeRequest 
+// Now merged into getFastIntent and the main streamText call logic.
 
 export async function POST(req: Request) {
   const { messages } = await req.json();
@@ -108,7 +70,7 @@ export async function POST(req: Request) {
   const sanitizedMessages = messages.map((m: any) => ({ ...m }));
 
   const sessionId = getSessionId(req);
-  let state = sessionStates.get(sessionId) || initDialogueState();
+  let state = (await getSession(sessionId)) || initDialogueState();
   const country = req.headers.get('x-vercel-ip-country') || 'Malaysia (MYR)';
   const currentDateTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const currentYear = new Date().getFullYear();
@@ -123,36 +85,21 @@ export async function POST(req: Request) {
     userCountry: country,
   });
 
-  // [Optimization: Hybrid Routing & Parallelization]
+  // [Optimization: Single LLM Call]
   const lastMsg = sanitizedMessages[sanitizedMessages.length - 1];
   const lastMsgContent = lastMsg.content || "";
   let intent: string;
   let safety = { safe: true, message: "" };
 
-  // [Fast Path] If the last message is a tool result from our preference collection, bypass LLM
-  if (lastMsg.role === 'tool' && (lastMsg.toolName === 'ask_user_preference' || lastMsg.toolName === 'confirm_slot')) {
-    console.log("[Optimization] Tool result detected, bypassing Analyzer.");
+  const fastIntent = getFastIntent(lastMsgContent, state);
+  if (fastIntent) {
+    console.log("[Optimization] Fast-routing matched:", fastIntent);
+    intent = fastIntent;
+  } else if (lastMsg.role === 'tool' && (lastMsg.toolName === 'ask_user_preference' || lastMsg.toolName === 'confirm_slot')) {
     intent = 'travel_planning';
   } else {
-    const fastIntent = getFastIntent(lastMsgContent, state);
-    if (fastIntent) {
-      console.log("[Optimization] Fast-routing matched:", fastIntent);
-      intent = fastIntent;
-    } else {
-      const analysis = await analyzeRequest(sanitizedMessages);
-      intent = analysis.intent;
-      safety = { safe: analysis.safe, message: analysis.message || "" };
-      
-      // [Refactor: Centralized Slot Update]
-      if (analysis.slots && intent !== 'out_of_scope') {
-        Object.entries(analysis.slots).forEach(([k, v]) => {
-          if (v && !(state.slots as any)[k]) {
-            (state.slots as any)[k] = v;
-            if (k === 'originCity') state.slots.currency = getCurrencyForOrigin(v);
-          }
-        });
-      }
-    }
+    // Default to main processing, moving analysis into the prompt
+    intent = 'travel_planning';
   }
 
   if (!safety.safe) {
@@ -288,6 +235,22 @@ export async function POST(req: Request) {
     execute: async () => ({ success: true })
   } as any);
 
+  const show_hotel_carousel = tool({
+    description: '展示一组酒店推荐卡片。',
+    parameters: z.object({
+      title: z.string().describe('推荐标题，例如 "巴黎市中心奢华酒店推荐"'),
+      hotels: z.array(z.object({
+        name: z.string().describe('酒店名称'),
+        rating: z.number().describe('评分 (0-5)'),
+        price: z.string().describe('价格范围，包含货币符号，例如 "$200 - $350"'),
+        image: z.string().optional().describe('酒店图片 URL'),
+        description: z.string().describe('酒店简短描述'),
+        bookingUrl: z.string().describe('预订链接或详情链接'),
+      })).describe('酒店列表'),
+    }),
+    execute: async () => ({ success: true })
+  } as any);
+
   const confirm_slot = tool({
     description: `登记用户偏好信息。`,
     parameters: z.object({
@@ -311,7 +274,14 @@ export async function POST(req: Request) {
     finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
   } else {
     // Basic travel tools
-    activeTools = { ask_user_preference, search_web, confirm_slot, show_ground_transport_card, show_map };
+    activeTools = { 
+      ask_user_preference, 
+      search_web, 
+      confirm_slot, 
+      show_ground_transport_card, 
+      show_map,
+      show_hotel_carousel
+    };
     
     // [Fix: Path to Flight Search] Use state-based injection instead of intent-locking
     if (canSearchFlights(state)) {
@@ -320,7 +290,9 @@ export async function POST(req: Request) {
       finalSystemPrompt += "\n【航班查询已解锁】如果用户同意或主动要求查询航班，请立即调用 search_flights_serpapi 获取实时数据。";
     }
     
-    finalSystemPrompt += "\n【严格约束】收到用户的偏好选择（如来自 ask_user_preference 的结果）后，必须立即执行 confirm_slot 记录，绝不允许重复询问同一个问题！";
+    finalSystemPrompt += "\n【槽位提取】如果用户在当前对话中提供了新的信息（如出发城市、目的地、天数、风格），且你尚未确认该信息，必须立即调用 confirm_slot 进行登记。";
+    finalSystemPrompt += "\n【严格约束】收到用户的偏好选择后，必须立即执行 confirm_slot 记录，绝不允许重复询问同一个问题！";
+    finalSystemPrompt += "\n【安全防范】如果用户请求包含非法、暴力或不当内容，请礼貌拒绝并引导回旅游话题。";
   }
 
   const result = await streamText({
@@ -330,10 +302,16 @@ export async function POST(req: Request) {
     maxSteps: 10,
     maxTokens: 4096,
     tools: activeTools,
+    onFinish: async ({ text, toolCalls, toolResults }) => {
+      // 最终状态保存移至 onFinish 确保异步一致性
+      // 但由于 streamText 是流式的，我们在函数末尾也会调用一次 setSession
+      // 注意：这里的 state 已经在循环中更新
+      await setSession(sessionId, state);
+    }
   });
 
-  // Save final state before returning (handles analyzer's updates)
-  sessionStates.set(sessionId, state);
+  // 在返回响应前，确保状态已初步同步
+  await setSession(sessionId, state);
 
   return result.toDataStreamResponse();
 }
@@ -342,13 +320,15 @@ export async function POST(req: Request) {
  * 从对话历史中提取状态更新
  */
 /**
- * 仅从工具调用的结果中提取状态同步
+ * 优化：增量同步状态，仅处理新消息
  */
 function extractStateFromToolResults(messages: any[], state: DialogueState): DialogueState {
-  state.confirmations = [];
   const slotNames: any = { originCity: '出发城市', destination: '目的地', tripDuration: '行程天数', travelStyle: '旅行风格' };
-
-  for (const msg of messages) {
+  
+  // 只处理 lastProcessedIndex 之后的消息
+  const newMessages = messages.slice(state.lastProcessedIndex);
+  
+  for (const msg of newMessages) {
     if (msg.role === 'assistant' && msg.toolInvocations) {
       for (const inv of msg.toolInvocations) {
         if (inv.state === 'result' && (inv.toolName === 'ask_user_preference' || inv.toolName === 'confirm_slot')) {
@@ -376,6 +356,9 @@ function extractStateFromToolResults(messages: any[], state: DialogueState): Dia
       }
     }
   }
+
+  // 更新处理索引
+  state.lastProcessedIndex = messages.length;
 
   if (getMissingSlots(state).length === 0 && state.stage === 'collecting') {
     state.stage = 'planning';

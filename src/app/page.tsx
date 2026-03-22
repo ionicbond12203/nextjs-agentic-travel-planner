@@ -5,6 +5,7 @@ import { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ThemeToggle } from "@/components/theme-toggle";
 import InteractiveMap from "@/components/interactive-map";
+import HotelCarousel from "@/components/hotel-carousel";
 
 const SUGGESTIONS = [
   "我想去欧洲旅行 🌍",
@@ -602,6 +603,17 @@ export default function Home() {
                               center={mapData.center}
                               zoom={mapData.zoom}
                               markers={mapData.markers}
+                            />
+                          </div>
+                        );
+                      }
+                      if (toolInv.toolName === 'show_hotel_carousel') {
+                        const hotelData = toolInv.args as any;
+                        return (
+                          <div key={toolInv.toolCallId} className="animate-fade-in w-full self-start" style={{ marginTop: m.content ? 0 : 0 }}>
+                            <HotelCarousel 
+                              title={hotelData.title}
+                              hotels={hotelData.hotels}
                             />
                           </div>
                         );
