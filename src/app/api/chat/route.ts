@@ -33,6 +33,46 @@ function getSessionId(req: Request): string {
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
+  // 提取原始数据并转换为对 LLM 友好的格式，主要是绕过 Ollama 对 role: 'tool' 的解析问题
+  const sanitizedMessages: any[] = [];
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.toolInvocations) {
+      const newMsg = { ...m };
+      
+      // 我们只针对 ask_user_preference 这种在客户端执行、会打断对话流的工具进行重写
+      const askPrefTools = newMsg.toolInvocations.filter((t: any) => t.toolName === 'ask_user_preference' && t.state === 'result');
+      const otherTools = newMsg.toolInvocations.filter((t: any) => !(t.toolName === 'ask_user_preference' && t.state === 'result'));
+      
+      // 保留处理过的部分以避免LLM丢失查询结果数据（如机票、景点）。只移除 ask_user_preference 结果
+      newMsg.toolInvocations = otherTools;
+      
+      if (newMsg.toolInvocations.length === 0) {
+        delete newMsg.toolInvocations;
+      }
+      
+      if (!newMsg.content && (!newMsg.toolInvocations || newMsg.toolInvocations.length === 0)) {
+        newMsg.content = "让我确认一下您的偏好和信息。";
+      }
+      
+      // 只加入 assistant 消息
+      if (newMsg.content || newMsg.toolInvocations) {
+        sanitizedMessages.push(newMsg);
+      }
+      
+      // 如果有问答结果，作为 user message 随后追加
+      if (askPrefTools.length > 0) {
+        const answers = askPrefTools.map((t: any) => `我选择的内容是：${t.result}`).join('\n');
+        
+        sanitizedMessages.push({
+          role: 'user',
+          content: answers
+        });
+      }
+    } else {
+      sanitizedMessages.push(m);
+    }
+  }
+
   // 获取或创建会话状态
   const sessionId = getSessionId(req);
   let state = sessionStates.get(sessionId) || initDialogueState();
@@ -58,16 +98,18 @@ export async function POST(req: Request) {
 
   const result = await streamText({
     model: ollama("qwen3.5:cloud"),
-    messages,
+    messages: sanitizedMessages,
     system: systemPrompt,
-    // @ts-ignore
+    //限制最大步数防止无限循环重复，允许充足迭代
     maxSteps: 10,
+    //设置足够的最大生成长度，防止回答中途截断
+    maxTokens: 4096,
     tools: {
       // 收集用户偏好（核心工具）
       ask_user_preference: tool({
         description: `当需要向用户询问偏好并期望用户在选项中做选择时调用。
-【重要】在信息收集阶段，必须通过此工具询问用户，禁止在普通文本中列出选项。
-每次只问一个问题。`,
+【极其重要】在信息收集阶段，必须通过此工具询问用户，禁止在普通文本中再次列出选项！
+【核心约束】绝对禁止在同一次回复中生成多个 ask_user_preference 调用。每次只能询问一个未确认的信息！`,
         parameters: z.object({
           question: z.string().describe('你想问用户的问题（不要包含选项），例如 "您计划在巴黎停留多少天？"'),
           options: z.array(z.string()).describe('提供给用户的具体选项数组，例如 ["3-5天", "6-8天", "一周以上"]（最多4个）'),
@@ -250,7 +292,8 @@ export async function POST(req: Request) {
 
       // 确认槽位（用于用户选择后更新状态）
       confirm_slot: tool({
-        description: '当用户通过 ask_user_preference 选择选项后，调用此工具确认槽位值。',
+        description: `当用户在对话中提供了明确的偏好信息（如出发地、目的地、天数、风格）后，必须调用此工具将信息登记到后台系统中。
+【注意】登记成功后，系统会推进状态，你可以再调用 ask_user_preference 询问下一个缺失的信息。可以伴随一句简短的反馈。`,
         parameters: z.object({
           slot_type: z.enum(['originCity', 'destination', 'tripDuration', 'travelStyle']),
           value: z.string().describe('用户选择的值'),
@@ -289,8 +332,51 @@ export async function POST(req: Request) {
  * 从对话历史中提取状态更新
  */
 function extractStateFromHistory(messages: any[], state: DialogueState): DialogueState {
-  // 遍历消息历史，检测用户选择
+  // 遍历消息历史，检测用户选择与工具结果
   for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolInvocations) {
+      for (const inv of msg.toolInvocations) {
+        if (inv.state === 'result' && (inv.toolName === 'ask_user_preference' || inv.toolName === 'confirm_slot')) {
+          const val = inv.toolName === 'confirm_slot' ? inv.args?.value : (inv.result || inv.args?.value);
+          const slotType = inv.args?.slot_type || inv.slot_type;
+          
+          if (slotType && val) {
+            // Update the slot directly from the tool result
+            if (slotType === 'originCity' && typeof val === 'string' && val.includes('(')) {
+                const codeMatch = val.match(/\(([A-Z]{3})\)/);
+                if (codeMatch) {
+                    (state.slots as any)[slotType] = codeMatch[1];
+                    state.slots.currency = getCurrencyForOrigin(codeMatch[1]);
+                } else {
+                    (state.slots as any)[slotType] = val;
+                }
+            } else if (slotType === 'originCity' && typeof val === 'string') {
+                const airportPatterns: Record<string, RegExp> = {
+                  'KUL': /吉隆坡|kul|kuala lumpur/i,
+                  'PEN': /槟城|pen|penang/i,
+                  'JHB': /新山|jhb|johor bahru|jb(?!k)/i,
+                  'KCH': /古晋|kch|kuching/i,
+                  'BKI': /亚庇|bki|kota kinabalu/i,
+                  'SIN': /新加坡|sin|singapore/i,
+                };
+                let matched = false;
+                for (const [code, pattern] of Object.entries(airportPatterns)) {
+                  if (pattern.test(val)) {
+                    (state.slots as any)[slotType] = code;
+                    state.slots.currency = getCurrencyForOrigin(code);
+                    matched = true;
+                    break;
+                  }
+                }
+                if (!matched) (state.slots as any)[slotType] = val;
+            } else {
+              (state.slots as any)[slotType] = val;
+            }
+          }
+        }
+      }
+    }
+
     if (msg.role !== 'user') continue;
 
     const content = msg.content?.toLowerCase() || '';

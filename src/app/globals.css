@@ -1,16 +1,60 @@
 @import "tailwindcss";
 
 :root {
-  --color-bg: #0f0f0f;
-  --color-surface: #1a1a1a;
-  --color-surface-hover: #252525;
-  --color-border: #2a2a2a;
-  --color-text: #e8e8e8;
-  --color-text-muted: #888;
+  /* Light mode variables */
+  --color-bg: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
   --color-accent: #6366f1;
-  --color-accent-hover: #818cf8;
+  --color-accent-hover: #4f46e5;
   --color-user-bubble: #2563eb;
-  --color-ai-bubble: #1e1e1e;
+  --color-user-text: #ffffff;
+  --color-ai-bubble: #f3f4f6;
+  --color-strong: #111827;
+  --color-skeleton: #e5e7eb;
+  --color-card-flight-bg: linear-gradient(145deg, rgba(255,255,255,0.9), rgba(243,244,246,0.9));
+  --color-card-transport-bg: linear-gradient(145deg, rgba(240,253,244,0.9), rgba(255,255,255,0.9));
+  --color-card-border: rgba(0,0,0,0.1);
+  --color-card-transport-border: rgba(34,197,94,0.3);
+  --color-card-label-bg: rgba(0,0,0,0.05);
+  --color-card-divider: rgba(0,0,0,0.1);
+  --color-card-transport-tip-bg: rgba(34,197,94,0.1);
+  --color-card-transport-tip-text: #166534;
+  --color-btn-disabled-bg: #e5e7eb;
+  --color-btn-disabled-text: #9ca3af;
+  --color-shadow: rgba(0,0,0,0.05);
+  --color-card-shadow: 0 10px 40px rgba(0,0,0,0.08);
+}
+
+.dark {
+    --color-bg: #0f0f0f;
+    --color-surface: #1a1a1a;
+    --color-surface-hover: #252525;
+    --color-border: #2a2a2a;
+    --color-text: #e8e8e8;
+    --color-text-muted: #888;
+    --color-accent: #6366f1;
+    --color-accent-hover: #818cf8;
+    --color-user-bubble: #2563eb;
+    --color-user-text: #ffffff;
+    --color-ai-bubble: #1e1e1e;
+    --color-strong: #ffffff;
+    --color-skeleton: #333333;
+    --color-card-flight-bg: linear-gradient(145deg, rgba(20,20,30,0.8), rgba(40,40,60,0.8));
+    --color-card-transport-bg: linear-gradient(145deg, rgba(20,60,40,0.8), rgba(30,80,50,0.8));
+    --color-card-border: rgba(255,255,255,0.1);
+    --color-card-transport-border: rgba(34,197,94,0.3);
+    --color-card-label-bg: rgba(255,255,255,0.1);
+    --color-card-divider: rgba(255,255,255,0.2);
+    --color-card-transport-tip-bg: rgba(34,197,94,0.1);
+    --color-card-transport-tip-text: #a7f3d0;
+    --color-btn-disabled-bg: #333333;
+    --color-btn-disabled-text: #666666;
+    --color-shadow: rgba(0,0,0,0.15);
+    --color-card-shadow: 0 10px 40px rgba(0,0,0,0.3);
 }
 
 * {
@@ -71,7 +115,7 @@ html, body {
 }
 
 .markdown-content strong {
-  color: #fff;
+  color: var(--color-strong);
   font-weight: 600;
 }
 

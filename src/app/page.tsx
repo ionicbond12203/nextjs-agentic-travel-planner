@@ -3,6 +3,7 @@
 import { useChat } from "ai/react";
 import { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const SUGGESTIONS = [
   "我想去欧洲旅行 🌍",
@@ -48,8 +49,8 @@ export default function Home() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: 40, height: 40, borderRadius: "12px", background: "#333" }} />
-            <div style={{ width: 120, height: 20, background: "#333", borderRadius: 4 }} />
+            <div style={{ width: 40, height: 40, borderRadius: "12px", background: "var(--color-skeleton)" }} />
+            <div style={{ width: 120, height: 20, background: "var(--color-skeleton)", borderRadius: 4 }} />
           </div>
         </header>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -115,7 +116,7 @@ export default function Home() {
             style={{
               fontSize: "1.1rem",
               fontWeight: 700,
-              color: "#fff",
+              color: "var(--color-text)",
               lineHeight: 1.2,
             }}
           >
@@ -150,6 +151,7 @@ export default function Home() {
           <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
             在线
           </span>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -187,7 +189,7 @@ export default function Home() {
                 style={{
                   fontSize: "1.75rem",
                   fontWeight: 700,
-                  color: "#fff",
+                  color: "var(--color-text)",
                   marginBottom: "8px",
                 }}
               >
@@ -302,7 +304,7 @@ export default function Home() {
                         }}
                       >
                         {m.role === "user" ? (
-                          <p style={{ lineHeight: 1.6 }}>
+                          <p style={{ lineHeight: 1.6, color: "var(--color-user-text)" }}>
                             {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
                           </p>
                         ) : (
@@ -354,7 +356,7 @@ export default function Home() {
                             alignSelf: "flex-start",
                             marginTop: m.content ? 0 : 0
                           }}>
-                            <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "16px", color: "#fff" }}>
+                            <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "16px", color: "var(--color-text)" }}>
                               {toolInv.args.question}
                             </h3>
                             {toolInv.state === "result" ? (
@@ -366,7 +368,7 @@ export default function Home() {
                                 borderRadius: "8px",
                                 fontSize: "0.95rem"
                               }}>
-                                ✓ 已选择: <strong style={{color: '#fff'}}>
+                                ✓ 已选择: <strong style={{color: 'var(--color-text)'}}>
                                   {typeof toolInv.result === 'string' ? toolInv.result : '已从服务器获取信息'}
                                 </strong>
                               </div>
@@ -404,16 +406,16 @@ export default function Home() {
                         const flight = toolInv.args as any;
                         return (
                           <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "linear-gradient(145deg, rgba(20,20,30,0.8), rgba(40,40,60,0.8))",
+                            background: "var(--color-card-flight-bg)",
                             backdropFilter: "blur(20px)",
-                            border: "1px solid rgba(255,255,255,0.1)",
+                            border: "1px solid var(--color-card-border)",
                             borderRadius: "20px",
                             padding: "24px",
                             width: "100%",
                             maxWidth: "480px",
-                            boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                            boxShadow: "var(--color-card-shadow)",
                             alignSelf: "flex-start",
-                            color: "#fff",
+                            color: "var(--color-text)",
                             display: "flex",
                             flexDirection: "column",
                             gap: "16px",
@@ -425,7 +427,7 @@ export default function Home() {
                                 <span style={{ fontSize: "24px" }}>✈️</span>
                                 <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{flight.airline}</span>
                               </div>
-                              <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", background: "rgba(255,255,255,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
+                              <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", background: "var(--color-card-label-bg)", padding: "4px 8px", borderRadius: "12px" }}>
                                 {flight.flightNumber}
                               </span>
                             </div>
@@ -434,24 +436,24 @@ export default function Home() {
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0" }}>
                               <div style={{ textAlign: "left" }}>
                                 <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.departure?.split(' ')[0]}</div>
-                                <div style={{ fontSize: "0.85rem", color: "#aaa" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
+                                <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
                               </div>
                               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", padding: "0 10px" }}>
-                                <span style={{ fontSize: "0.75rem", color: "#888", marginBottom: "4px" }}>{flight.duration}</span>
-                                <div style={{ width: "100%", height: "2px", background: "rgba(255,255,255,0.2)", position: "relative" }}>
-                                  <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "#6366f1" }} />
+                                <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px" }}>{flight.duration}</span>
+                                <div style={{ width: "100%", height: "2px", background: "var(--color-card-divider)", position: "relative" }}>
+                                  <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "var(--color-accent)" }} />
                                 </div>
                               </div>
                               <div style={{ textAlign: "right" }}>
                                 <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.arrival?.split(' ')[0]}</div>
-                                <div style={{ fontSize: "0.85rem", color: "#aaa" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
+                                <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
                               </div>
                             </div>
 
                             {/* Footer: Price & Action */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(255,255,255,0.2)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed var(--color-card-divider)" }}>
                               <div>
-                                <span style={{ fontSize: "0.8rem", color: "#aaa" }}>预估总价</span>
+                                <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估总价</span>
                                 <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#22c55e" }}>{flight.price}</div>
                               </div>
                               {toolInv.state === "result" && (
@@ -493,16 +495,16 @@ export default function Home() {
                         };
                         return (
                           <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "linear-gradient(145deg, rgba(20,60,40,0.8), rgba(30,80,50,0.8))",
+                            background: "var(--color-card-transport-bg)",
                             backdropFilter: "blur(20px)",
-                            border: "1px solid rgba(34,197,94,0.3)",
+                            border: "1px solid var(--color-card-transport-border)",
                             borderRadius: "20px",
                             padding: "24px",
                             width: "100%",
                             maxWidth: "480px",
-                            boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                            boxShadow: "var(--color-card-shadow)",
                             alignSelf: "flex-start",
-                            color: "#fff",
+                            color: "var(--color-text)",
                             display: "flex",
                             flexDirection: "column",
                             gap: "16px"
@@ -537,15 +539,15 @@ export default function Home() {
 
                             {/* Tips */}
                             {transport.tips && (
-                              <div style={{ background: "rgba(34,197,94,0.1)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", color: "#a7f3d0" }}>
+                              <div style={{ background: "var(--color-card-transport-tip-bg)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", color: "var(--color-card-transport-tip-text)" }}>
                                 💡 {transport.tips}
                               </div>
                             )}
 
                             {/* Price & Action */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(34,197,94,0.3)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed var(--color-card-transport-border)" }}>
                               <div>
-                                <span style={{ fontSize: "0.8rem", color: "#aaa" }}>预估费用</span>
+                                <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估费用</span>
                                 <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#22c55e" }}>{transport.price}</div>
                               </div>
                               {toolInv.state === "result" && transport.bookingUrl && transport.bookingUrl !== '#' && (
@@ -689,12 +691,12 @@ export default function Home() {
             style={{
               background:
                 isLoading || !input.trim()
-                  ? "#333"
+                  ? "var(--color-btn-disabled-bg)"
                   : "linear-gradient(135deg, #6366f1, #8b5cf6)",
               border: "none",
               borderRadius: "12px",
               padding: "14px 24px",
-              color: isLoading || !input.trim() ? "#666" : "#fff",
+              color: isLoading || !input.trim() ? "var(--color-btn-disabled-text)" : "#fff",
               fontWeight: 600,
               fontSize: "0.95rem",
               cursor: isLoading || !input.trim() ? "not-allowed" : "pointer",

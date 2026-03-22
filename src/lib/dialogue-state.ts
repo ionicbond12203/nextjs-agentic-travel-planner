@@ -39,13 +39,13 @@ const MALAYSIA_AIRPORTS = ['KUL', 'PEN', 'JHB', 'KCH', 'BKI', 'LGK', 'IPH', 'TGG
 
 /** 检测用户是否来自马来西亚 */
 export function detectMalaysianUser(originCode: string | null): boolean {
-  if (!originCode) return false;
+  if (!originCode || typeof originCode !== 'string') return false;
   return MALAYSIA_AIRPORTS.includes(originCode.toUpperCase());
 }
 
 /** 获取用户对应的货币 */
 export function getCurrencyForOrigin(originCode: string | null): string {
-  if (!originCode) return 'MYR';
+  if (!originCode || typeof originCode !== 'string') return 'MYR';
   const code = originCode.toUpperCase();
 
   // 马来西亚
@@ -72,7 +72,7 @@ const EEA_COUNTRIES = [
 
 /** 判断用户是否享有欧盟优惠票价 */
 export function isEEAUser(nationality: string | null): boolean {
-  if (!nationality) return false;
+  if (!nationality || typeof nationality !== 'string') return false;
   return EEA_COUNTRIES.includes(nationality.toUpperCase());
 }
 
