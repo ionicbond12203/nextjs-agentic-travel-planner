@@ -5,6 +5,7 @@
  * 1. 工作流编排 - 定义明确的对话阶段
  * 2. 防止过早调用外部API
  * 3. 确保用户身份信息与RAG结果交叉推理
+ * 4. 强制时效性检查（2026年数据优先）
  */
 
 import { DialogueState, buildStateContextPrompt, getMissingSlots, canSearchFlights } from './dialogue-state';
@@ -47,17 +48,20 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 - ✓ 行程天数
 - ✓ 旅行风格偏好
 
-### 【阶段二：行程规划】
+### 【阶段二：行程规划与事实核查】
 只有当所有必要信息收集完毕后，才能进入此阶段：
-- 调用 search_web 查询景点开放时间、票价
-- 调用 search_flights_serpapi 查询航班
+1. **先核查，后规划**：必须先调用 search_web 查询目的地 2026 年最新的交通票券（如 PASS）、景点开放时间及针对外国游客的准确票价。
+2. **拒绝陈旧知识**：如果你的记忆（如 JR Pass 价格）与 2026 年搜索结果冲突，**必须以搜索结果为准**。
+3. **调用 API**：
+   - search_flights_serpapi：查询航班
+   - search_web：查询票价、资讯、评价
 
 ### 【阶段三：方案展示】
 使用专用卡片工具展示：
 - show_flight_card：展示航班推荐
 - show_ground_transport_card：展示陆路交通推荐
-- show_hotel_carousel：展示一组酒店/住宿推荐。当用户需要寻找住处或对比多个酒店时调用。每次至少推荐 3 个选项以供横向对比。
-- show_map：展示交互式地图，标注景点、酒店或关键地理位置。当用户询问具体位置或需要可视化行程时调用。
+- show_hotel_carousel：展示酒店推荐（至少 3 个选项）
+- show_map：标注关键位置
 `;
 
   // 状态上下文
@@ -81,16 +85,17 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 请继续使用 ask_user_preference 收集信息。
 `;
 
-  // RAG约束
-  const ragConstraint = state.slots.originCity && detectMalaysianUser(state.slots.originCity)
-    ? `
-## ⚠️ RAG检索约束（马来西亚游客）
-用户是马来西亚游客，查询欧洲景点时：
-- 卢浮宫门票：€32（非EEA游客价），而非€22
-- 凡尔赛宫门票：€35（非EEA游客价），而非€22
-- 奥赛博物馆：€17（非EEA游客价），而非€14
+  // RAG约束 (通用国籍/居住地逻辑)
+  const isLocal = state.slots.originCity && state.slots.destination &&
+                  state.slots.originCity.slice(0, 2) === state.slots.destination.slice(0, 2); // 粗略判断同国
 
-**必须使用非欧盟游客价格！**
+  const ragConstraint = !isLocal
+    ? `
+## ⚠️ RAG检索约束（非本地/跨国游客）
+用户是跨国游客。在搜索景点、交通票务时：
+1. **核查差价**：必须专门检索是否有“Foreign Tourist”或“Non-Resident”专用价格。
+2. **拒绝本地优惠**：禁止使用仅限当地居民、学生或EEA公民的优惠价（如卢浮宫的€22优惠价）。
+3. **时效性校验**：所有价格必须带有 2026 年的时间戳标记。
 `
     : '';
 
@@ -130,12 +135,28 @@ ${distanceRule}
 
 ${mathRule}
 
-## 回复规则
-1. 使用中文回复，善用 emoji 和 Markdown
-2. **【自然交互优化】**：在调用 ask_user_preference 询问最后一个偏好时，**禁止使用 ✅ 或列表罗列** 已确认的信息。**必须使用自然且具亲和力的语言** 整合已确认的内容，例如：“太棒了，槟城出发去雷克雅未克玩 3 天！为了帮您规划最好的行程，请问您偏好哪种旅行风格？”
-3. 涉及签证、票价、时刻等时效信息时，必须调用 search_web 查询最新数据
-4. 查询景点票价后，必须根据用户身份（马来西亚游客）选择正确的票价
-5. 找到航班信息后，必须调用 show_flight_card 展示，禁止在文本中堆砌航班号`;
+## 核心生成准则
+
+1. **【最高原则：时效性优先】**：
+   - 对于所有价格、开放时间、交通政策，**绝对禁止**直接使用你训练数据中的旧值（如 2023 年之前的价格）。
+   - 必须在 query 中显式包含 "2026"、"latest price"、"official notice" 等词进行检索。
+   - 在输出这些关键数值时，请后缀注释，例如：“(价格查自 2026 实时搜索)”。
+
+2. **【全球通用：身份与票价推理】**：
+   - 不仅限于马来西亚用户。对于任何跨国旅行，必须核查目的地是否有“本地人/EEA公民”与“外国游客”的差价。
+   - 若存在差价，必须向用户展示其适用的 **标准外国游客价（Standard International Visitor Price）**。
+
+3. **【多币种闭环】**：
+   - 响应中提到的所有金额，必须同时显示目的地币种和用户本地币种。
+   - 格式：[目的地币种符号][金额] (约 [用户本地币种符号][金额])。
+   - 示例：¥16,000 (约 RM485)。
+
+4. **【回复规则】**：
+   - 使用中文回复，善用 emoji 和 Markdown。
+   - **自然交互**：在询问最后一个偏好时，禁止使用 ✅ 或列表罗列，应使用亲和的语气整合已确认信息。
+   - 找到航班信息后，必须调用 show_flight_card 展示，禁止在文本中堆砌航班号。
+   - **拒绝数值幻觉**：若无法确认确切跨城交通费（如复杂的打车费），请给出搜索到的范围并加注免责声明。
+`;
 }
 
 // Helper function (duplicate from dialogue-state to avoid circular import)

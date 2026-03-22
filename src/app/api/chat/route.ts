@@ -129,12 +129,12 @@ export async function POST(req: Request) {
     }),
     execute: async ({ query, context }: { query: string; context?: string }) => {
       console.log("[RAG] Searching:", query);
+      
+      // 增强搜索词：强制包含 2026 和 官方/最新 关键词
       let enhancedQuery = query;
-      if (state.slots.originCity && detectMalaysianUser(state.slots.originCity)) {
-        if (query.toLowerCase().includes('price') || query.toLowerCase().includes('ticket') || query.toLowerCase().includes('票价')) {
-          enhancedQuery = `${query} non-EU tourist international visitor`;
-        }
-      }
+      if (!query.includes('2026')) enhancedQuery += ' 2026';
+      if (!query.includes('official') && !query.includes('官方')) enhancedQuery += ' official latest';
+
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -146,15 +146,15 @@ export async function POST(req: Request) {
         }),
       });
       const data = (await response.json()) as any;
-      const attractionMatch = query.match(/(louvre|versailles|eiffel|museum|博物馆|宫殿)/i);
-      if (attractionMatch && state.slots.originCity && detectMalaysianUser(state.slots.originCity)) {
-        return {
-          answer: data.answer,
-          results: data.results || [],
-          _priceNote: `⚠️ 价格提示：用户是马来西亚游客（非EEA公民），查询到的欧洲景点票价请使用非欧盟游客价格。`
-        };
-      }
-      return { answer: data.answer, results: data.results || [] };
+      
+      // 增加时效性提示标签，强制模型感知
+      const resultMessage = {
+        answer: data.answer,
+        results: data.results || [],
+        recencyNote: `重要：检索结果已包含 2026 年最新资讯。若结果显示价格上涨或政策变动，请以此为准。`
+      };
+
+      return resultMessage;
     },
   } as any);
 
