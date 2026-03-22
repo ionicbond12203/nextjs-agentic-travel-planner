@@ -121,12 +121,13 @@ export async function POST(req: Request) {
   });
 
   const search_web = tool({
-    description: `当需要查询景点开放时间、官方订票链接、最新票价或实时资讯时调用。
-【重要】搜索欧洲景点票价时，请在query中包含"non-EU tourist price"或"international visitor price"，以避免返回本地居民优惠价。`,
+    description: `当需要查询景点/餐厅/通票的最新资讯、营业时间、官方订票/预订链接或最新价格时调用。
+【极度重要-数值拦截】对于任何涉及通行卡(Pass)或门票的数值问题，必须先调用此工具核查。
+【重要】搜索欧洲景点票价时，请在query中包含"non-EU tourist price"或"international visitor price"。查询餐厅时，带上"booking url"或"TheFork"。`,
     parameters: z.object({
-      query: z.string().describe('搜索关键词，例如 "The Met museum international visitor ticket price 2026 mandatory"'),
-      verification_target: z.enum(['TICKET_POLICY_FOR_FOREIGNERS', 'BUSINESS_OPERATING_STATUS', 'GENERAL_INFO']).optional()
-        .describe('你正在核查的目标。查询票价时必须选 TICKET_POLICY_FOR_FOREIGNERS，查询景点是否关门选 BUSINESS_OPERATING_STATUS'),
+      query: z.string().describe('搜索关键词，例如 "Roma Pass 72 hours official price 2026"'),
+      verification_target: z.enum(['TICKET_POLICY_FOR_FOREIGNERS', 'BUSINESS_OPERATING_STATUS', 'BOOKING_AND_NAVIGATION', 'NUMERICAL_ENTITY_CHECK', 'GENERAL_INFO']).optional()
+        .describe('你正在核查的目标。查询票价/数值选 NUMERICAL_ENTITY_CHECK 或 TICKET_POLICY_FOR_FOREIGNERS，查是否关门选 BUSINESS_OPERATING_STATUS，提取预订链接和地图选 BOOKING_AND_NAVIGATION'),
       context: z.string().optional().describe('搜索上下文，如用户身份信息'),
     }),
     execute: async ({ query, verification_target, context }: { query: string; verification_target?: string; context?: string }) => {
@@ -135,8 +136,10 @@ export async function POST(req: Request) {
       // 增强搜索词：强制包含 2026 和 官方/最新 关键词
       let enhancedQuery = query;
       if (!query.includes('2026')) enhancedQuery += ' 2026';
-      if (!query.includes('official') && !query.includes('官方')) enhancedQuery += ' official latest';
+      if (!query.match(/official|官方|预订|booking/i)) enhancedQuery += ' official latest';
       if (verification_target === 'TICKET_POLICY_FOR_FOREIGNERS') enhancedQuery += ' fee mandatory international tourist';
+      if (verification_target === 'BOOKING_AND_NAVIGATION') enhancedQuery += ' booking url Google Maps address open status';
+      if (verification_target === 'NUMERICAL_ENTITY_CHECK') enhancedQuery += ' exact price cost ticket pass';
 
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
