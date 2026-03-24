@@ -177,6 +177,22 @@ export default function Home() {
     }
   }, [sessions, setMessages]);
 
+  const handleClearAllSessions = useCallback(() => {
+    if (!window.confirm("确定要清空所有聊天记录吗？此操作不可撤销。")) return;
+    
+    localStorage.removeItem(LS_SESSIONS);
+    localStorage.removeItem(LS_ACTIVE);
+    
+    setSessions([]);
+    setMessages([]);
+    setHasStarted(false);
+    
+    const newId = genId();
+    setSessionId(newId);
+    saveActiveId(newId);
+    setSidebarOpen(false);
+  }, [setMessages]);
+
   /* ─── Loading skeleton ─── */
   if (!mounted) {
     return (
@@ -374,6 +390,40 @@ export default function Home() {
               </div>
             ))
           )}
+        </div>
+
+        {/* Clear all button */}
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)" }}>
+          <button
+            onClick={handleClearAllSessions}
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              background: "transparent",
+              color: "var(--color-text-muted)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "8px",
+              fontSize: "0.85rem",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget.style.color = "#ef4444");
+              (e.currentTarget.style.borderColor = "#ef4444");
+              (e.currentTarget.style.background = "rgba(239, 68, 68, 0.05)");
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget.style.color = "var(--color-text-muted)");
+              (e.currentTarget.style.borderColor = "var(--color-border)");
+              (e.currentTarget.style.background = "transparent");
+            }}
+          >
+            🗑 清空所有记录
+          </button>
         </div>
       </aside>
 
