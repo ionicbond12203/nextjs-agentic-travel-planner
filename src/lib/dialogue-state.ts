@@ -17,6 +17,8 @@ export interface UserSlot {
   tripDuration: string | null;
   /** 旅行风格偏好 */
   travelStyle: string | null;
+  /** 旅行日期 (旅行的具体月份或时间段) */
+  travelDates: string | null;
   /** 用户国籍（用于票价判断） */
   nationality: string | null;
   /** 用户所在货币区 */
@@ -39,10 +41,44 @@ export interface DialogueState {
 /** 马来西亚主要机场城市 */
 const MALAYSIA_AIRPORTS = ['KUL', 'PEN', 'JHB', 'KCH', 'BKI', 'LGK', 'IPH', 'TGG', 'SBW', 'MYY'];
 
+/** 马来西亚主要城市关键词 */
+const MALAYSIA_KEYWORDS = ['KUL', 'PEN', 'JHB', 'KCH', 'BKI', '吉隆坡', '城市', '槟城', '新山', '古晋', '亚庇', '兰卡威', 'MALAYSIA', '马来西亚'];
+
 /** 检测用户是否来自马来西亚 */
 export function detectMalaysianUser(originCode: string | null): boolean {
   if (!originCode || typeof originCode !== 'string') return false;
-  return MALAYSIA_AIRPORTS.includes(originCode.toUpperCase());
+  const upper = originCode.toUpperCase();
+  return MALAYSIA_AIRPORTS.includes(upper) || MALAYSIA_KEYWORDS.some(k => upper.includes(k));
+}
+
+/** 
+ * 限制目的地表 (Travel Restrictions Table)
+ * 格式: [OriginCountryCode]: { [DestinationKeyword]: WarningMessage }
+ */
+export const TRAVEL_RESTRICTIONS: Record<string, Record<string, string>> = {
+  'MY': {
+    '以色列': '⚠️ 马来西亚公民护照注明“除以色列外，此护照对所有国家有效”。前往以色列通常需要马来西亚内政部的特别许可，普通自由行极难成行。',
+    'ISRAEL': '⚠️ Malaysian passports are invalid for travel to Israel without special permission from the Ministry of Home Affairs. Standard tourism is prohibited.',
+  }
+};
+
+/** 检查行程限制 */
+export function checkTravelRestrictions(originCity: string | null, destination: string | null): string | null {
+  if (!destination) return null;
+  
+  // 如果没有明确的出发城市，但在消息中提到了马来西亚目的地是 Israel，也应预警
+  const isMalaysian = detectMalaysianUser(originCity) || 
+                      (originCity === null && /(吉隆坡|kl|马来西亚|myr)/i.test(destination));
+
+  if (isMalaysian) {
+    const destUpper = destination.toUpperCase();
+    for (const [key, warning] of Object.entries(TRAVEL_RESTRICTIONS['MY'])) {
+      if (destUpper.includes(key)) {
+        return warning;
+      }
+    }
+  }
+  return null;
 }
 
 /** 获取用户对应的货币 */
@@ -89,11 +125,12 @@ export function initDialogueState(): DialogueState {
       destination: null,
       tripDuration: null,
       travelStyle: null,
+      travelDates: null,
       nationality: null,
       currency: null,
     },
     confirmations: [],
-    pendingSlots: ['originCity', 'destination', 'tripDuration', 'travelStyle'],
+    pendingSlots: ['originCity', 'destination', 'tripDuration', 'travelStyle', 'travelDates'],
     lastProcessedIndex: 0,
   };
 }
@@ -110,7 +147,8 @@ export function getMissingSlots(state: DialogueState): string[] {
   if (!state.slots.destination) missing.push('destination');
   if (!state.slots.tripDuration) missing.push('tripDuration');
   if (!state.slots.travelStyle) missing.push('travelStyle');
-
+  if (!state.slots.travelDates) missing.push('travelDates');
+ 
   return missing;
 }
 
@@ -151,6 +189,7 @@ export function buildStateContextPrompt(state: DialogueState): string {
   if (state.slots.destination) filledSlots.push(`目的地：${state.slots.destination}`);
   if (state.slots.tripDuration) filledSlots.push(`行程天数：${state.slots.tripDuration}`);
   if (state.slots.travelStyle) filledSlots.push(`旅行风格：${state.slots.travelStyle}`);
+  if (state.slots.travelDates) filledSlots.push(`旅行时间：${state.slots.travelDates}`);
   if (state.slots.nationality) filledSlots.push(`国籍：${state.slots.nationality}`);
   if (state.slots.currency) filledSlots.push(`货币偏好：${state.slots.currency}`);
 
@@ -167,6 +206,7 @@ export function buildStateContextPrompt(state: DialogueState): string {
       destination: '目的地',
       tripDuration: '行程天数',
       travelStyle: '旅行风格偏好',
+      travelDates: '旅行时间/日期',
     };
     parts.push(`待收集：${missing.map(m => slotNames[m] || m).join('、')}`);
   }
@@ -187,7 +227,7 @@ export function buildStateContextPrompt(state: DialogueState): string {
 export function extractSlotFromMessage(
   message: string,
   currentSlot: string | null,
-  slotType: 'originCity' | 'destination' | 'tripDuration' | 'travelStyle'
+  slotType: 'originCity' | 'destination' | 'tripDuration' | 'travelStyle' | 'travelDates'
 ): string | null {
   // 如果已有值，保持不变
   if (currentSlot) return currentSlot;
@@ -263,10 +303,21 @@ export function extractSlotFromMessage(
 
     for (const [keyword, style] of Object.entries(styleKeywords)) {
       if (lowerMessage.includes(keyword)) {
-        return style;
-      }
-    }
-  }
-
-  return null;
-}
+         return style;
+       }
+     }
+   }
+ 
+   // 旅行日期提取 (简单模式匹配)
+   if (slotType === 'travelDates') {
+     const monthMatch = message.match(/(\d{4}年)?(\d{1,2})月/);
+     if (monthMatch) return monthMatch[0];
+     
+     const seasonKeywords = ['春天', '夏天', '秋天', '冬天', 'spring', 'summer', 'autumn', 'fall', 'winter', '4月', '四月'];
+     for (const k of seasonKeywords) {
+       if (lowerMessage.includes(k)) return k;
+     }
+   }
+ 
+   return null;
+ }

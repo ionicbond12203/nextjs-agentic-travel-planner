@@ -27,4 +27,8 @@ export async function setSession(sessionId: string, state: DialogueState): Promi
   }
 }
 
+export function getRedis() {
+  return redis;
+}
+
 export default redis;

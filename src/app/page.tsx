@@ -1,11 +1,46 @@
 "use client";
 
-import { useChat } from "ai/react";
-import { useRef, useEffect, useState } from "react";
+import { useChat, type Message } from "ai/react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { ThemeToggle } from "@/components/theme-toggle";
 import InteractiveMap from "@/components/interactive-map";
 import HotelCarousel from "@/components/hotel-carousel";
+
+/* ─── Types ─── */
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  updatedAt: number;
+}
+
+/* ─── LocalStorage helpers ─── */
+const LS_SESSIONS = "chat-sessions";
+const LS_ACTIVE = "active-session-id";
+
+function genId() {
+  return crypto.randomUUID();
+}
+
+function loadSessions(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(LS_SESSIONS);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveSessions(sessions: ChatSession[]) {
+  localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
+}
+
+function loadActiveId(): string | null {
+  return localStorage.getItem(LS_ACTIVE);
+}
+
+function saveActiveId(id: string) {
+  localStorage.setItem(LS_ACTIVE, id);
+}
 
 const SUGGESTIONS = [
   "我想去欧洲旅行 🌍",
@@ -16,7 +51,7 @@ const SUGGESTIONS = [
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const { messages, input, handleInputChange, handleSubmit, isLoading, addToolResult } =
+  const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, addToolResult } =
     useChat({
       api: "/api/chat",
     });
@@ -24,22 +59,125 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [hasStarted, setHasStarted] = useState(false);
 
-  // Prevent hydration mismatch - only render after client mount
+  /* ─── Multi-session state ─── */
+  const [sessionId, setSessionId] = useState<string>("");
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Ref to avoid stale closures in the save effect
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+
+  /* ─── Init: load sessions from localStorage ─── */
   useEffect(() => {
+    const saved = loadSessions();
+    const activeId = loadActiveId();
+    const activeSession = activeId ? saved.find(s => s.id === activeId) : null;
+
+    if (activeSession && activeSession.messages.length > 0) {
+      setSessions(saved);
+      setSessionId(activeSession.id);
+      setMessages(activeSession.messages);
+      setHasStarted(true);
+    } else {
+      const newId = genId();
+      setSessions(saved); // keep old sessions, just start a fresh chat
+      setSessionId(newId);
+      saveActiveId(newId);
+    }
     setMounted(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scroll to bottom on new messages
+  /* ─── Persist messages into current session whenever they change ─── */
+  useEffect(() => {
+    if (!mounted || !sessionIdRef.current) return;
+    const sid = sessionIdRef.current;
+
+    setSessions(prev => {
+      const idx = prev.findIndex(s => s.id === sid);
+
+      // No messages → nothing to persist (fresh session that hasn't sent yet)
+      if (messages.length === 0) {
+        // If the session already existed but is now empty (user cleared), remove it
+        if (idx !== -1) {
+          const next = prev.filter(s => s.id !== sid);
+          saveSessions(next);
+          return next;
+        }
+        return prev;
+      }
+
+      // Derive title from the first user message
+      const firstUserMsg = messages.find(m => m.role === "user");
+      const title = firstUserMsg
+        ? (typeof firstUserMsg.content === "string" ? firstUserMsg.content : "新对话").slice(0, 20)
+        : "新对话";
+
+      const updated: ChatSession = {
+        id: sid,
+        title,
+        messages,
+        updatedAt: Date.now(),
+      };
+
+      let next: ChatSession[];
+      if (idx !== -1) {
+        next = [...prev];
+        next[idx] = updated;
+      } else {
+        next = [updated, ...prev];
+      }
+      saveSessions(next);
+      return next;
+    });
+  }, [messages, mounted]);
+
+  /* ─── Auto-scroll ─── */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Focus input on load
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  /* ─── Focus input ─── */
+  useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Return loading skeleton during SSR to prevent hydration mismatch
+  /* ─── Session actions ─── */
+  const handleNewChat = useCallback(() => {
+    const newId = genId();
+    setSessionId(newId);
+    saveActiveId(newId);
+    setMessages([]);
+    setHasStarted(false);
+    setSidebarOpen(false);
+  }, [setMessages]);
+
+  const handleSwitchSession = useCallback((targetId: string) => {
+    const target = sessions.find(s => s.id === targetId);
+    if (!target) return;
+    setSessionId(targetId);
+    saveActiveId(targetId);
+    setMessages(target.messages);
+    setHasStarted(true);
+    setSidebarOpen(false);
+  }, [sessions, setMessages]);
+
+  const handleDeleteSession = useCallback((targetId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = sessions.filter(s => s.id !== targetId);
+    setSessions(next);
+    saveSessions(next);
+
+    // If we just deleted the active session, start a fresh one
+    if (targetId === sessionIdRef.current) {
+      const newId = genId();
+      setSessionId(newId);
+      saveActiveId(newId);
+      setMessages([]);
+      setHasStarted(false);
+    }
+  }, [sessions, setMessages]);
+
+  /* ─── Loading skeleton ─── */
   if (!mounted) {
     return (
       <div className="flex flex-col h-screen">
@@ -71,100 +209,319 @@ export default function Home() {
 
   const handleSuggestionClick = (text: string) => {
     setHasStarted(true);
-    // Create a synthetic event with the suggestion text
     const syntheticEvent = {
       target: { value: text },
     } as React.ChangeEvent<HTMLInputElement>;
     handleInputChange(syntheticEvent);
-    // Need to submit after state update
     setTimeout(() => {
       const form = document.getElementById("chat-form") as HTMLFormElement;
       form?.requestSubmit();
     }, 50);
   };
 
-  return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <header
-        style={{
-          background: "var(--color-surface)",
-          borderBottom: "1px solid var(--color-border)",
-          padding: "16px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: "12px",
-            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "20px",
-          }}
-        >
-          ✈️
-        </div>
-        <div>
-          <h1
-            style={{
-              fontSize: "1.1rem",
-              fontWeight: 700,
-              color: "var(--color-text)",
-              lineHeight: 1.2,
-            }}
-          >
-            旅游 AI 规划师
-          </h1>
-          <span
-            style={{
-              fontSize: "0.75rem",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            Powered by Ollama · qwen3
-          </span>
-        </div>
-        <div
-          style={{
-            marginLeft: "auto",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-          }}
-        >
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: "#22c55e",
-              display: "inline-block",
-            }}
-          />
-          <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-            在线
-          </span>
-          <ThemeToggle />
-        </div>
-      </header>
+  /* ─── Sorted sessions (newest first) ─── */
+  const sortedSessions = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
-      {/* Messages area */}
-      <div
+  return (
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      {/* ═══ Sidebar overlay (mobile) ═══ */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 40,
+          }}
+        />
+      )}
+
+      {/* ═══ Sidebar ═══ */}
+      <aside
         style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "24px",
+          position: "fixed",
+          left: sidebarOpen ? 0 : -280,
+          top: 0,
+          bottom: 0,
+          width: 270,
+          background: "var(--color-surface)",
+          borderRight: "1px solid var(--color-border)",
+          zIndex: 50,
+          transition: "left 0.25s ease",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: sidebarOpen ? "4px 0 24px rgba(0,0,0,0.15)" : "none",
         }}
       >
+        {/* Sidebar header */}
+        <div
+          style={{
+            padding: "16px",
+            borderBottom: "1px solid var(--color-border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: "1rem", color: "var(--color-text)" }}>
+            💬 对话列表
+          </span>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: "1.2rem",
+              cursor: "pointer",
+              color: "var(--color-text-muted)",
+              padding: "4px",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* New chat button */}
+        <div style={{ padding: "12px 16px" }}>
+          <button
+            onClick={handleNewChat}
+            style={{
+              width: "100%",
+              padding: "10px 16px",
+              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+              color: "#fff",
+              border: "none",
+              borderRadius: "10px",
+              fontWeight: 600,
+              fontSize: "0.9rem",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+              transition: "opacity 0.2s",
+            }}
+          >
+            ＋ 新对话
+          </button>
+        </div>
+
+        {/* Session list */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
+          {sortedSessions.length === 0 ? (
+            <div style={{ color: "var(--color-text-muted)", fontSize: "0.85rem", textAlign: "center", padding: "24px 0" }}>
+              暂无对话记录
+            </div>
+          ) : (
+            sortedSessions.map(s => (
+              <div
+                key={s.id}
+                onClick={() => handleSwitchSession(s.id)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  marginBottom: "4px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: s.id === sessionId ? "var(--color-surface-hover)" : "transparent",
+                  border: s.id === sessionId ? "1px solid var(--color-border)" : "1px solid transparent",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => {
+                  if (s.id !== sessionId) (e.currentTarget.style.background = "var(--color-surface-hover)");
+                }}
+                onMouseLeave={e => {
+                  if (s.id !== sessionId) (e.currentTarget.style.background = "transparent");
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: "0.88rem",
+                    fontWeight: s.id === sessionId ? 600 : 400,
+                    color: "var(--color-text)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {s.title}
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                    {new Date(s.updatedAt).toLocaleDateString()} · {s.messages.length} 条
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteSession(s.id, e)}
+                  title="删除对话"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    color: "var(--color-text-muted)",
+                    padding: "4px 6px",
+                    borderRadius: "6px",
+                    flexShrink: 0,
+                    transition: "color 0.15s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "#ef4444")}
+                  onMouseLeave={e => (e.currentTarget.style.color = "var(--color-text-muted)")}
+                >
+                  🗑
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </aside>
+
+      {/* ═══ Main content ═══ */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        {/* Header */}
+        <header
+          style={{
+            background: "var(--color-surface)",
+            borderBottom: "1px solid var(--color-border)",
+            padding: "16px 24px",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          {/* Sidebar toggle */}
+          <button
+            onClick={() => setSidebarOpen(o => !o)}
+            title="对话列表"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--color-border)",
+              borderRadius: "8px",
+              padding: "6px 8px",
+              cursor: "pointer",
+              fontSize: "1.1rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--color-text)",
+              transition: "all 0.2s",
+              position: "relative",
+            }}
+          >
+            ☰
+            {sessions.length > 0 && (
+              <span style={{
+                position: "absolute",
+                top: -4,
+                right: -4,
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                background: "#6366f1",
+                color: "#fff",
+                fontSize: "0.6rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+              }}>
+                {sessions.length}
+              </span>
+            )}
+          </button>
+
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: "12px",
+              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "20px",
+            }}
+          >
+            ✈️
+          </div>
+          <div>
+            <h1
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: 700,
+                color: "var(--color-text)",
+                lineHeight: 1.2,
+              }}
+            >
+              旅游 AI 规划师
+            </h1>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              Powered by Ollama · qwen3
+            </span>
+          </div>
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#22c55e",
+                display: "inline-block",
+              }}
+            />
+            <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+              在线
+            </span>
+            {/* New chat shortcut in header */}
+            <button
+              onClick={handleNewChat}
+              title="新对话"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+                fontSize: "1rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "4px 8px",
+                borderRadius: "8px",
+                transition: "all 0.2s",
+                marginLeft: "8px",
+                marginRight: "4px",
+                color: "var(--color-text)",
+              }}
+            >
+              ✚
+            </button>
+            <ThemeToggle />
+          </div>
+        </header>
+
+        {/* Messages area */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "24px",
+          }}
+        >
         {!hasStarted && messages.length === 0 ? (
           /* Welcome Screen */
           <div
@@ -743,6 +1100,7 @@ export default function Home() {
         >
           AI 生成的内容仅供参考，请务必自行核实关键信息
         </p>
+      </div>
       </div>
     </div>
   );

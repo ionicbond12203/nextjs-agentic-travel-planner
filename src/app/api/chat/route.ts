@@ -8,20 +8,24 @@ import {
   canSearchFlights,
   getCurrencyForOrigin,
   detectMalaysianUser,
+  checkTravelRestrictions,
 } from "@/lib/dialogue-state";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { getCorrectPrice, validatePrice } from "@/lib/price-inference";
+import { RagTrace, gradeContextRelevance, gradeFactuality } from "@/lib/rag-evaluator";
 
-import { getSession, setSession } from "@/lib/redis";
+import { getSession, setSession, getRedis } from "@/lib/redis";
 
 // 移除内存存储，改用 Redis
 // const sessionStates = new Map<string, DialogueState>();
 
-// 使用官方的 OpenAI Provider 连接到 Ollama 的本地兼容接口
+// 使用官方的 OpenAI Provider 连接到本地 Ollama 控制的云端模型
 const ollama = createOpenAI({
   baseURL: "http://localhost:11434/v1",
   apiKey: "ollama",
 });
+
+const cloudModel = ollama("qwen3.5:cloud");
 
 function getSessionId(req: Request): string {
   // 简化版：使用 IP + User-Agent 作为会话ID
@@ -36,12 +40,12 @@ function getSessionId(req: Request): string {
  */
 function getFastIntent(message: string, state: DialogueState): string | null {
   const content = message.toLowerCase();
-  
+
   // 1. Safety/Greeting Bypass
   if (/^(hi|hello|hey|你好|您好|哈喽|早上好|下午好|在吗)/i.test(content) && content.length < 15) {
     return 'general_chat';
   }
-  
+
   // 2. Intent Keywords
   if (content.includes('航班') || content.includes('飞机') || content.includes('机票') || content.includes('flight')) {
     return 'flight_inquiry';
@@ -57,7 +61,36 @@ function getFastIntent(message: string, state: DialogueState): string | null {
     return 'out_of_scope';
   }
 
+  // 5. Travel Restriction Check
+  let origin = state.slots.originCity;
+  if (!origin) {
+    // Heuristic: check if user mentions Malaysia/KL in the current message
+    if (/(吉隆坡|kl|kuala lumpur|malaysia|马来西亚)/i.test(content)) {
+      origin = 'KUL'; 
+    }
+  }
+  
+  const restrictionError = checkTravelRestrictions(origin, content);
+  if (restrictionError) {
+    return 'restricted_travel';
+  }
+
   return null;
+}
+
+/**
+ * [Optimization] Message Pruning for Long-running Agentic Sessions
+ * Prevents context overflow by truncating old tool result blobs and keeping only essential state.
+ */
+function pruneMessages(messages: any[], maxTokens = 24000): any[] {
+  // 简易逻辑：如果消息数量过多，保留前2条（System/Initial User）和最近的 N 条
+  if (messages.length < 15) return messages;
+
+  const systemMsg = messages[0];
+  const initialUserMsg = messages[1];
+  const recentMessages = messages.slice(-12); // 保留最近 12 条记录（约 2-3 个完整的工具交互环）
+
+  return [systemMsg, initialUserMsg, ...recentMessages];
 }
 
 // 🛑 [REMOVED] analyzeRequest 
@@ -90,11 +123,15 @@ export async function POST(req: Request) {
   const lastMsgContent = lastMsg.content || "";
   let intent: string;
   let safety = { safe: true, message: "" };
+  let activeTools: any = {};
 
   const fastIntent = getFastIntent(lastMsgContent, state);
   if (fastIntent) {
     console.log("[Optimization] Fast-routing matched:", fastIntent);
     intent = fastIntent;
+    if (intent === 'restricted_travel') {
+      activeTools = {}; // Immediate lockdown
+    }
   } else if (lastMsg.role === 'tool' && (lastMsg.toolName === 'ask_user_preference' || lastMsg.toolName === 'confirm_slot')) {
     intent = 'travel_planning';
   } else {
@@ -132,12 +169,12 @@ export async function POST(req: Request) {
     }),
     execute: async ({ query, verification_target, context }: { query: string; verification_target?: string; context?: string }) => {
       console.log("[RAG] Searching:", query, "Target:", verification_target);
-      
+
       // 净化搜索词：避免塞入诱导性、假设性词汇（如 mandatory fee, 涨价）导致搜索引擎和 LLM 出现幻觉
       let enhancedQuery = query;
       if (!query.includes('2026')) enhancedQuery += ' 2026';
       if (!query.match(/official|官方/i)) enhancedQuery += ' official';
-      
+
       // 仅保留中性的意图后缀，严禁加入 "fee/mandatory/tourist" 等暗示性词汇
       if (verification_target === 'BOOKING_AND_NAVIGATION') enhancedQuery += ' booking url location open status';
       if (verification_target === 'NUMERICAL_ENTITY_CHECK') enhancedQuery += ' exact price ticket';
@@ -154,7 +191,7 @@ export async function POST(req: Request) {
         }),
       });
       const data = (await response.json()) as any;
-      
+
       // 添加极其严厉的反幻觉防穿透补丁
       const resultMessage = {
         answer: data.answer,
@@ -177,9 +214,9 @@ export async function POST(req: Request) {
     }),
     execute: async ({ location, check_in_date, require_status, budget_category }: any) => {
       console.log("[RAG/Hotel] Searching:", location, "Date:", check_in_date, "Status:", require_status);
-      
-      const query = `${location} hotel ${budget_category || ''} open status ${check_in_date.substring(0,4)} news`;
-      
+
+      const query = `${location} hotel ${budget_category || ''} open status ${check_in_date.substring(0, 4)} news`;
+
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,7 +229,7 @@ export async function POST(req: Request) {
         }),
       });
       const data = (await response.json()) as any;
-      
+
       return {
         answer: data.answer,
         results: data.results || [],
@@ -221,7 +258,7 @@ export async function POST(req: Request) {
         departure_id, arrival_id, outbound_date, currency: finalCurrency,
         hl: "zh-CN", api_key: process.env.SERPAPI_API_KEY as string
       });
-      if (return_date) { params.append("type", "1"); params.append("return_date", return_date); } 
+      if (return_date) { params.append("type", "1"); params.append("return_date", return_date); }
       else { params.append("type", "2"); }
 
       try {
@@ -233,7 +270,7 @@ export async function POST(req: Request) {
           price: `${finalCurrency} ${f.price}`,
           airlines: f.flights.map((fl: any) => fl.airline).join(", "),
           departure: `${f.flights[0].departure_airport.id} ${f.flights[0].departure_airport.time}`,
-          arrival: `${f.flights[f.flights.length-1].arrival_airport.id} ${f.flights[f.flights.length-1].arrival_airport.time}`,
+          arrival: `${f.flights[f.flights.length - 1].arrival_airport.id} ${f.flights[f.flights.length - 1].arrival_airport.time}`,
           duration: `${Math.floor(f.total_duration / 60)}h ${f.total_duration % 60}m`,
         }));
         return { success: true, data: best_flights };
@@ -307,25 +344,34 @@ export async function POST(req: Request) {
 
   // --- Routing & Tool Injection Logic ---
 
-  let activeTools: any = {};
   let finalSystemPrompt = baseSystemPrompt;
 
   if (intent === 'out_of_scope') {
     finalSystemPrompt = "你是一个专业的旅游顾问。用户问了一个超出你服务范围的问题（如编程、数学、医疗）。请礼貌地拒绝，并引导用户回到旅游规划的话题上。";
+  } else if (intent === 'restricted_travel') {
+    activeTools = {};
+    const restrictionError = checkTravelRestrictions(state.slots.originCity, lastMsgContent) || "⚠️ 该行程因护照限制或法律风险暂时无法规划。";
+    finalSystemPrompt = `你是一个非常严谨负责的旅游顾问。用户请求前往一个受限目的地（如马来西亚护照持有者去以色列）。
+你的任务是：
+1. **立即停止所有行程规划**。
+2. **给出以下严肃警告**：\n${restrictionError}\n
+3. **解释原因**：说明针对该国籍持有者的法律风险或护照限制（尤其是马来西亚护照对以色列无效的情况）。
+4. **禁止工具调用**：绝不调用任何航班、酒店或地图工具。
+5. **引导用户**：询问用户是否需要规划其他目的地。`;
   } else if (intent === 'general_chat') {
     activeTools = {}; // Only chat
     finalSystemPrompt = "你是一个亲切友好的旅游顾问，正在与用户闲聊。不需要调用工具，直接回复即可。";
   } else {
     // 基础核心工具始终注入
-    activeTools = { 
-      ask_user_preference, 
-      confirm_slot, 
+    activeTools = {
+      ask_user_preference,
+      confirm_slot,
       show_map,
     };
-    
+
     // 动态路由：判断是否为跟团游
     const isGroupTour = state.slots.travelStyle && state.slots.travelStyle.includes('跟团');
-    
+
     if (isGroupTour) {
       // 跟团游：只需通用搜索即可（重点搜 Tour Package），剥夺 DIY 工具
       activeTools.search_web = search_web;
@@ -336,31 +382,154 @@ export async function POST(req: Request) {
       activeTools.show_ground_transport_card = show_ground_transport_card;
       activeTools.show_hotel_carousel = show_hotel_carousel;
     }
-    
+
     // [Fix: Path to Flight Search] Use state-based injection instead of intent-locking
     if (canSearchFlights(state)) {
       activeTools.search_flights_serpapi = search_flights_serpapi;
       activeTools.show_flight_card = show_flight_card;
       finalSystemPrompt += "\n【航班查询已解锁】如果用户同意或主动要求查询航班，请立即调用 search_flights_serpapi 获取实时数据。";
     }
-    
+
     finalSystemPrompt += "\n【槽位提取】如果用户在当前对话中提供了新的信息（如出发城市、目的地、天数、风格），且你尚未确认该信息，必须立即调用 confirm_slot 进行登记。";
     finalSystemPrompt += "\n【严格约束】收到用户的偏好选择后，必须立即执行 confirm_slot 记录，绝不允许重复询问同一个问题！";
     finalSystemPrompt += "\n【安全防范】如果用户请求包含非法、暴力或不当内容，请礼貌拒绝并引导回旅游话题。";
   }
 
+  // [Optimization: Context Window Management]
+  const processedMessages = pruneMessages(sanitizedMessages);
+
+  // [Agentic RAG: Pre-generation Grader & Query Rewriter]
+  // Note: For a more advanced flow, we could use multiple generateText calls.
+  // Here we use the system prompt to enforce self-evaluation and provide feedback via tool results.
+
   const result = await streamText({
-    model: ollama("qwen3.5:cloud"),
-    messages: sanitizedMessages,
+    model: cloudModel,
+    messages: processedMessages,
     system: finalSystemPrompt,
     maxSteps: 10,
     maxTokens: 4096,
     tools: activeTools,
+    onStepFinish: async (step) => {
+      // 如果这一步调用了搜索工具，我们要评分
+      const searchCalls = step.toolCalls.filter(tc => tc.toolName === 'search_web' || tc.toolName === 'search_hotels');
+      if (searchCalls.length > 0) {
+        const results = step.toolResults.filter(tr => tr.toolName === 'search_web' || tr.toolName === 'search_hotels');
+        const contexts: string[] = [];
+        results.forEach((tr: any) => {
+          if (tr.result?.answer) contexts.push(tr.result.answer);
+          if (tr.result?.results) tr.result.results.forEach((r: any) => r.content && contexts.push(r.content));
+        });
+
+        if (contexts.length > 0) {
+          const query = searchCalls[0].args.query;
+          const relevance = await gradeContextRelevance(query, contexts);
+          console.log(`[Agentic-RAG] Step Relevance Score: ${relevance.score} | Rationale: ${relevance.rationale}`);
+          
+          if (relevance.score < 0.6) {
+            console.log(`[Agentic-RAG] Low relevance detected. Encouraging query rewriting...`);
+            // 我们不能直接修改已生成的 toolResults，但我们可以添加一条“自省”消息到对话历史中
+            // 在 AI SDK 中，我们可以通过返回特定的 toolResult 提示模型
+            // 或者利用 maxSteps，模型会自动决定下一步。
+            // 改进建议：在 toolResult 中加入评分反馈
+            results.forEach((tr: any) => {
+              if (tr.result) {
+                tr.result.relevanceScore = relevance.score;
+                tr.result.feedback = `【系统评分：不相关 (${relevance.score})】原因：${relevance.rationale}。请尝试重写搜索关键词（例如更具体的地点、年份或官方术语）并重新搜索，不要基于这些无效信息编造预测。`;
+              }
+            });
+          }
+        }
+      }
+    },
     onFinish: async ({ text, toolCalls, toolResults }) => {
-      // 最终状态保存移至 onFinish 确保异步一致性
-      // 但由于 streamText 是流式的，我们在函数末尾也会调用一次 setSession
-      // 注意：这里的 state 已经在循环中更新
+      // 最终状态保存
       await setSession(sessionId, state);
+
+      // [Agentic RAG: Post-generation Factuality Guard]
+      if (text) {
+        const actualUserQuery = messages.filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
+        const factuality = await gradeFactuality(actualUserQuery, text);
+        if (factuality.score < 0.5) {
+          console.warn(`[Agentic-RAG] CRITICAL: Hallucination detected in final answer! Score: ${factuality.score}`);
+          // 在流式输出中，我们已经把内容发给用户了。
+          // 真正的拦截需要在 streamText 之前完成。
+          // 这里我们记录这个严重错误用于回归测试。
+        }
+      }
+
+      // [RAG Evaluation] Capture trace for LLM-as-a-Judge evaluation ...
+      if (process.env.ENABLE_RAG_EVAL === 'true') {
+        try {
+          const retrievedContexts: string[] = [];
+          const traceToolCalls: RagTrace['toolCalls'] = [];
+
+          if (messages && Array.isArray(messages)) {
+            for (const msg of messages) {
+              if (msg.role === 'assistant' && msg.toolInvocations) {
+                for (const inv of msg.toolInvocations) {
+                  if (inv.state === 'result') {
+                    const resultData = inv.result;
+                    if (resultData?.answer) retrievedContexts.push(resultData.answer);
+                    if (resultData?.results && Array.isArray(resultData.results)) {
+                      for (const r of resultData.results) {
+                        if (r.content) retrievedContexts.push(r.content.slice(0, 500));
+                      }
+                    }
+                    traceToolCalls.push({
+                      toolName: inv.toolName,
+                      args: inv.args || {},
+                      result: typeof inv.result === 'object' ? JSON.stringify(inv.result).slice(0, 300) : inv.result,
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          // Also capture any tool results from the CURRENT finish (if not already in messages)
+          if (toolResults && Array.isArray(toolResults)) {
+            for (const tr of toolResults as any[]) {
+              // Only add if not already captured from toolInvocations (common in AI SDK)
+              if (!traceToolCalls.some(tc => tc.toolName === tr.toolName && JSON.stringify(tc.args) === JSON.stringify(tr.args))) {
+                const resultData = tr.result;
+                if (resultData?.answer) retrievedContexts.push(resultData.answer);
+                if (resultData?.results && Array.isArray(resultData.results)) {
+                  for (const r of resultData.results) {
+                    if (r.content) retrievedContexts.push(r.content.slice(0, 500));
+                  }
+                }
+                traceToolCalls.push({
+                  toolName: tr.toolName,
+                  args: tr.args || {},
+                  result: typeof tr.result === 'object' ? JSON.stringify(tr.result).slice(0, 300) : tr.result,
+                });
+              }
+            }
+          }
+
+          // Find the last user message for the query (skipping tool results/assistant replies)
+          const actualUserQuery = messages
+            .filter((m: any) => m.role === 'user')
+            .slice(-1)[0]?.content || lastMsgContent;
+
+          const ragTrace: RagTrace = {
+            userQuery: actualUserQuery,
+            retrievedContexts,
+            llmAnswer: text || '',
+            toolCalls: traceToolCalls,
+            timestamp: new Date().toISOString(),
+            sessionId,
+          };
+
+          // Fire-and-forget: store trace to Redis with 24h TTL
+          const redis = getRedis();
+          const traceKey = `eval:trace:${sessionId}:${Date.now()}`;
+          await redis.set(traceKey, JSON.stringify(ragTrace), 'EX', 86400);
+          console.log(`[RAG-Eval] Trace captured: ${traceKey}`);
+        } catch (evalErr: any) {
+          console.warn('[RAG-Eval] Trace capture failed (non-blocking):', evalErr.message);
+        }
+      }
     }
   });
 
@@ -378,28 +547,28 @@ export async function POST(req: Request) {
  */
 function extractStateFromToolResults(messages: any[], state: DialogueState): DialogueState {
   const slotNames: any = { originCity: '出发城市', destination: '目的地', tripDuration: '行程天数', travelStyle: '旅行风格' };
-  
+
   // 只处理 lastProcessedIndex 之后的消息
   const newMessages = messages.slice(state.lastProcessedIndex);
-  
+
   for (const msg of newMessages) {
     if (msg.role === 'assistant' && msg.toolInvocations) {
       for (const inv of msg.toolInvocations) {
         if (inv.state === 'result' && (inv.toolName === 'ask_user_preference' || inv.toolName === 'confirm_slot')) {
           const val = inv.toolName === 'confirm_slot' ? inv.args?.value : (inv.result || inv.args?.value);
           const slotType = inv.args?.slot_type || inv.slot_type;
-          
+
           if (slotType && val) {
             if (slotType === 'originCity' && typeof val === 'string' && val.includes('(')) {
-                const codeMatch = val.match(/\(([A-Z]{3})\)/);
-                if (codeMatch) {
-                    (state.slots as any)[slotType] = codeMatch[1];
-                    state.slots.currency = getCurrencyForOrigin(codeMatch[1]);
-                } else { (state.slots as any)[slotType] = val; }
+              const codeMatch = val.match(/\(([A-Z]{3})\)/);
+              if (codeMatch) {
+                (state.slots as any)[slotType] = codeMatch[1];
+                state.slots.currency = getCurrencyForOrigin(codeMatch[1]);
+              } else { (state.slots as any)[slotType] = val; }
             } else {
               (state.slots as any)[slotType] = val;
             }
-            
+
             const label = slotNames[slotType];
             if (label) {
               const entry = `✓ ${label}: ${val}`;
