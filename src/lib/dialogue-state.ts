@@ -229,8 +229,8 @@ export function extractSlotFromMessage(
   currentSlot: string | null,
   slotType: 'originCity' | 'destination' | 'tripDuration' | 'travelStyle' | 'travelDates'
 ): string | null {
-  // 如果已有值，保持不变
-  if (currentSlot) return currentSlot;
+  // 如果已有值且非空，保持不变 (Idempotent check)
+  if (currentSlot && currentSlot !== 'null') return currentSlot;
 
   const lowerMessage = message.toLowerCase();
 
@@ -253,6 +253,39 @@ export function extractSlotFromMessage(
     for (const [code, pattern] of Object.entries(airportPatterns)) {
       if (pattern.test(message)) {
         return code;
+      }
+    }
+  }
+
+  // 目的地提取 (新增)
+  if (slotType === 'destination') {
+    // 基础城市提取
+    const cityPatterns: Record<string, RegExp> = {
+      'Tokyo': /东京|tokyo/i,
+      'Paris': /巴黎|paris/i,
+      'London': /伦敦|london/i,
+      'New York': /纽约|new york|nyc/i,
+      'Singapore': /新加坡|singapore/i,
+      'Bangkok': /曼谷|bangkok/i,
+      'Seoul': /首尔|seoul/i,
+      'Osaka': /大阪|osaka/i,
+      'Kyoto': /京都|kyoto/i,
+      'Rome': /罗马|rome/i,
+    };
+
+    for (const [city, pattern] of Object.entries(cityPatterns)) {
+      if (pattern.test(message)) {
+        return city;
+      }
+    }
+
+    // 通用提取：如果用户说 "去XXX" 或 "to XXX"
+    const generalMatch = message.match(/(?:去|到|到访|去往|to|visit)\s*([\u4e00-\u9fa5]{2,}|[a-zA-Z]{3,})/i);
+    if (generalMatch && generalMatch[1]) {
+      // 简单过滤掉一些常用词
+      const blackList = ['这里', '那里', '这儿', '地方', 'place', 'there'];
+      if (!blackList.includes(generalMatch[1].toLowerCase())) {
+        return generalMatch[1];
       }
     }
   }
@@ -315,9 +348,47 @@ export function extractSlotFromMessage(
      
      const seasonKeywords = ['春天', '夏天', '秋天', '冬天', 'spring', 'summer', 'autumn', 'fall', 'winter', '4月', '四月'];
      for (const k of seasonKeywords) {
-       if (lowerMessage.includes(k)) return k;
-     }
-   }
- 
-   return null;
- }
+      if (lowerMessage.includes(k)) return k;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 从消息数组中批量提取状态
+ */
+export function extractStateFromUserMessages(messages: any[], state: DialogueState): DialogueState {
+  // 仅处理用户消息
+  const userMessages = messages.filter(m => m.role === 'user');
+  
+  for (const msg of userMessages) {
+    const content = msg.content || "";
+    if (!content) continue;
+
+    // 尝试提取所有缺失的槽位
+    const missing = getMissingSlots(state);
+    for (const slot of missing) {
+      const extracted = extractSlotFromMessage(content, (state.slots as any)[slot], slot as any);
+      if (extracted) {
+        (state.slots as any)[slot] = extracted;
+        
+        // 添加确认记录
+        const slotNames: any = { 
+          originCity: '出发城市', 
+          destination: '目的地', 
+          tripDuration: '行程天数', 
+          travelStyle: '旅行风格',
+          travelDates: '旅行时间'
+        };
+        const label = slotNames[slot];
+        if (label) {
+          const entry = `✓ ${label}: ${extracted} (从文字提取)`;
+          if (!state.confirmations.includes(entry)) state.confirmations.push(entry);
+        }
+      }
+    }
+  }
+
+  return state;
+}

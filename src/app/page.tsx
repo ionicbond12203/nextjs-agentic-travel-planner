@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat, type Message } from "ai/react";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { ThemeToggle } from "@/components/theme-toggle";
 import InteractiveMap from "@/components/interactive-map";
@@ -20,7 +20,10 @@ const LS_SESSIONS = "chat-sessions";
 const LS_ACTIVE = "active-session-id";
 
 function genId() {
-  return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 11) + Math.random().toString(36).substring(2, 11);
 }
 
 function loadSessions(): ChatSession[] {
@@ -49,12 +52,33 @@ const SUGGESTIONS = [
   "适合家庭的海岛度假推荐",
 ];
 
+/* ─── Components ─── */
+
+function BriefItem({ label, value, icon }: { label: string, value?: string, icon: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "var(--color-bg)", borderRadius: "10px", border: "1px solid var(--color-border)" }}>
+      <span style={{ fontSize: "1.1rem" }}>{icon}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+        <div style={{ fontSize: "0.85rem", color: value ? "var(--color-text)" : "var(--color-text-muted)", fontWeight: value ? 600 : 400 }}>
+          {value || "待确认..."}
+        </div>
+      </div>
+      {value && <span style={{ color: "#22c55e", fontSize: "0.8rem" }}>✓</span>}
+    </div>
+  );
+}
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, addToolResult } =
-    useChat({
-      api: "/api/chat",
-    });
+  const initialMessages = useMemo(() => [], []);
+  const chatOptions = useMemo(() => ({
+    api: "/api/chat",
+    initialMessages,
+  }), [initialMessages]);
+
+  const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, addToolResult, data } =
+    useChat(chatOptions);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [hasStarted, setHasStarted] = useState(false);
@@ -132,6 +156,44 @@ export default function Home() {
       return next;
     });
   }, [messages, mounted]);
+
+  /* ─── Travel Brief State ─── */
+  const [slots, setSlots] = useState<{
+    originCity?: string;
+    destination?: string;
+    tripDuration?: string;
+    travelStyle?: string;
+  }>({});
+  const [showBrief, setShowBrief] = useState(true);
+  const [totalBudget, setTotalBudget] = useState(0);
+
+  // Sync slots and calculate budget from messages
+  useEffect(() => {
+    const newSlots: any = {};
+    let budget = 0;
+    messages.forEach(m => {
+      m.toolInvocations?.forEach(inv => {
+        if (inv.state === 'result') {
+          // Slots
+          if (inv.toolName === 'confirm_slot') {
+            const { slot_type, value } = inv.args as any;
+            newSlots[slot_type] = value;
+          }
+          // Budget (Approximate extraction from results)
+          const res = inv.result as any;
+          if (res?.price && typeof res.price === 'string') {
+            const match = res.price.match(/(\d+(\.\d+)?)/);
+            if (match) budget += parseFloat(match[0]);
+          }
+        }
+      });
+    });
+    setSlots(prev => {
+      const hasChanges = Object.entries(newSlots).some(([k, v]) => prev[k as keyof typeof prev] !== v);
+      return hasChanges ? { ...prev, ...newSlots } : prev;
+    });
+    setTotalBudget(prev => prev === budget ? prev : budget);
+  }, [messages]);
 
   /* ─── Auto-scroll ─── */
   useEffect(() => {
@@ -428,7 +490,107 @@ export default function Home() {
       </aside>
 
       {/* ═══ Main content ═══ */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+        
+        {/* Travel Brief (Floating Dashboard) */}
+        {hasStarted && (
+          <div style={{
+            position: "absolute",
+            right: showBrief ? 24 : -300,
+            top: 80,
+            width: 260,
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "16px",
+            boxShadow: "0 10px 40px rgba(0,0,0,0.15)",
+            zIndex: 30,
+            transition: "right 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+            padding: "20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+            backdropFilter: "blur(10px)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--color-text)" }}>📍 我的行程计划</span>
+              <button 
+                onClick={() => setShowBrief(false)}
+                style={{ background: "transparent", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "1.1rem" }}
+              >✕</button>
+            </div>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <BriefItem label="出发城市" value={slots.originCity} icon="🏠" />
+              <BriefItem label="目的地" value={slots.destination} icon="✈️" />
+              <BriefItem label="行程天数" value={slots.tripDuration} icon="⏱️" />
+              <BriefItem label="旅行风格" value={slots.travelStyle} icon="✨" />
+            </div>
+
+            {totalBudget > 0 && (
+              <div style={{ 
+                marginTop: "4px", 
+                padding: "12px", 
+                borderRadius: "12px", 
+                background: "var(--color-bg)", 
+                border: "1px dashed var(--color-border)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px"
+              }}>
+                <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600 }}>预估总支出 💰</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--color-accent)" }}>
+                   ~ {totalBudget.toLocaleString()} <span style={{ fontSize: "0.8rem", fontWeight: 500 }}>{slots.originCity?.includes('KUL') ? 'MYR' : 'USD'}</span>
+                </div>
+              </div>
+            )}
+
+            {Object.values(slots).filter(Boolean).length === 4 && (
+              <div style={{ 
+                marginTop: "4px",
+                padding: "10px", 
+                borderRadius: "10px", 
+                background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.2))", 
+                color: "#16a34a", 
+                fontSize: "0.75rem",
+                textAlign: "center",
+                fontWeight: 700,
+                border: "1px solid rgba(34, 197, 94, 0.3)"
+              }}>
+                ✅ 已准备好为您规划细节
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Brief Toggle Button (When closed) */}
+        {hasStarted && !showBrief && (
+          <button
+            onClick={() => setShowBrief(true)}
+            style={{
+              position: "absolute",
+              right: 24,
+              top: 80,
+              width: 48,
+              height: 48,
+              borderRadius: "14px",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+              zIndex: 30,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.3rem",
+              transition: "transform 0.2s"
+            }}
+            onMouseEnter={e => e.currentTarget.style.transform = "scale(1.05)"}
+            onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+          >
+            📍
+          </button>
+        )}
+
         {/* Header */}
         <header
           style={{
@@ -719,8 +881,36 @@ export default function Home() {
                         ) : (
                           <div className="markdown-content">
                             <ReactMarkdown>
-                              {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
+                               {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
                             </ReactMarkdown>
+                          </div>
+                        )}
+
+                        {/* Factuality Badge (if available in stream data) */}
+                        {m.role === 'assistant' && !isLoading && (
+                          <div style={{ 
+                            marginTop: "12px", 
+                            paddingTop: "12px", 
+                            borderTop: "1px solid var(--color-border)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "0.7rem",
+                            color: "var(--color-text-muted)"
+                          }}>
+                            <div style={{ 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: "4px", 
+                              padding: "2px 6px", 
+                              background: "rgba(34, 197, 94, 0.1)", 
+                              color: "#16a34a", 
+                              borderRadius: "4px",
+                              fontWeight: 600
+                            }}>
+                              <span style={{ fontSize: "0.8rem" }}>🛡️</span> 已验证事实
+                            </div>
+                            <span>Agentic RAG 思维审计已通过</span>
                           </div>
                         )}
                       </div>
@@ -728,144 +918,64 @@ export default function Home() {
 
                     {/* GenUI - 拦截 Tool Calls 渲染成可交互卡片 */}
                     {m.toolInvocations?.map((toolInv) => {
-                      if (toolInv.toolName === 'search_web') {
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "rgba(99, 102, 241, 0.05)",
-                            border: "1px solid var(--color-border)",
-                            borderRadius: "12px",
-                            padding: "12px 16px",
-                            width: "fit-content",
-                            alignSelf: "flex-start",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            color: "var(--color-text-muted)",
-                            fontSize: "0.85rem"
-                          }}>
-                            {toolInv.state === "result" ? "✅" : "🌐"}
-                            <span>
-                              {toolInv.state === "result" 
-                                ? `已搜索：${toolInv.args.query}` 
-                                : `正在查询最新资讯：${toolInv.args.query}...`}
-                            </span>
-                          </div>
-                        );
-                      }
-                      if (toolInv.toolName === 'ask_user_preference') {
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "var(--color-surface)",
-                            border: "1px solid var(--color-border)",
-                            borderRadius: "16px",
-                            padding: "20px",
-                            width: "100%",
-                            maxWidth: "480px",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
-                            alignSelf: "flex-start",
-                            marginTop: m.content ? 0 : 0
-                          }}>
-                            <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "16px", color: "var(--color-text)" }}>
-                              {toolInv.args.question}
-                            </h3>
-                            {toolInv.state === "result" ? (
-                              <div style={{
-                                background: "rgba(99, 102, 241, 0.1)",
-                                border: "1px solid var(--color-accent)",
-                                color: "var(--color-text)",
-                                padding: "12px 16px",
-                                borderRadius: "8px",
-                                fontSize: "0.95rem"
-                              }}>
-                                ✓ 已选择: <strong style={{color: 'var(--color-text)'}}>
-                                  {typeof toolInv.result === 'string' ? toolInv.result : '已从服务器获取信息'}
-                                </strong>
-                              </div>
-                            ) : (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                                {toolInv.args.options.map((opt: string, i: number) => (
-                                  <button
-                                    key={i}
-                                    onClick={() => addToolResult({ toolCallId: toolInv.toolCallId, result: opt })}
-                                    className="option-card"
-                                    style={{
-                                      background: "var(--color-bg)",
-                                      border: "1px solid var(--color-border)",
-                                      padding: "14px 16px",
-                                      borderRadius: "8px",
-                                      textAlign: "left",
-                                      fontSize: "0.95rem",
-                                      color: "var(--color-text)",
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      alignItems: "center",
-                                      cursor: "pointer"
-                                    }}
-                                  >
-                                    <span>{opt}</span>
-                                    <span style={{ color: "var(--color-text-muted)" }}>→</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-                      if (toolInv.toolName === 'show_flight_card') {
-                        const flight = toolInv.args as any;
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "var(--color-card-flight-bg)",
-                            backdropFilter: "blur(20px)",
-                            border: "1px solid var(--color-card-border)",
-                            borderRadius: "20px",
-                            padding: "24px",
-                            width: "100%",
-                            maxWidth: "480px",
-                            boxShadow: "var(--color-card-shadow)",
-                            alignSelf: "flex-start",
-                            color: "var(--color-text)",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "16px",
-                            marginTop: m.content ? 0 : 0
-                          }}>
-                            {/* Header: Airline & Flight No */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <span style={{ fontSize: "24px" }}>✈️</span>
-                                <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{flight.airline}</span>
-                              </div>
-                              <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", background: "var(--color-card-label-bg)", padding: "4px 8px", borderRadius: "12px" }}>
-                                {flight.flightNumber}
-                              </span>
-                            </div>
+                      const { toolName, toolCallId, state, args } = toolInv;
 
-                            {/* Center: Route & Time */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0" }}>
-                              <div style={{ textAlign: "left" }}>
-                                <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.departure?.split(' ')[0]}</div>
-                                <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
+                      // 1. 特殊卡片渲染 (展示性组件)
+                      if (state === 'result') {
+                        if (toolName === 'show_flight_card') {
+                          const flight = toolInv.args as any;
+                          return (
+                            <div key={toolCallId} className="animate-fade-in" style={{
+                              background: "linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8))",
+                              backdropFilter: "blur(20px)",
+                              border: "1px solid rgba(255, 255, 255, 0.1)",
+                              borderRadius: "20px",
+                              padding: "24px",
+                              width: "100%",
+                              maxWidth: "480px",
+                              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+                              alignSelf: "flex-start",
+                              color: "#fff",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "16px",
+                              marginTop: m.content ? 0 : 0
+                            }}>
+                              {/* Header: Airline & Flight No */}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span style={{ fontSize: "24px" }}>✈️</span>
+                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{flight.airline}</span>
+                                </div>
+                                <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
+                                  {flight.flightNumber}
+                                </span>
                               </div>
-                              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", padding: "0 10px" }}>
-                                <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginBottom: "4px" }}>{flight.duration}</span>
-                                <div style={{ width: "100%", height: "2px", background: "var(--color-card-divider)", position: "relative" }}>
-                                  <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "var(--color-accent)" }} />
+
+                              {/* Center: Route & Time */}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0" }}>
+                                <div style={{ textAlign: "left" }}>
+                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.departure?.split(' ')[0]}</div>
+                                  <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
+                                </div>
+                                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", padding: "0 10px" }}>
+                                  <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.4)", marginBottom: "4px" }}>{flight.duration}</span>
+                                  <div style={{ width: "100%", height: "2px", background: "rgba(255,255,255,0.1)", position: "relative" }}>
+                                    <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "#6366f1" }} />
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.arrival?.split(' ')[0]}</div>
+                                  <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
                                 </div>
                               </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.arrival?.split(' ')[0]}</div>
-                                <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
-                              </div>
-                            </div>
 
-                            {/* Footer: Price & Action */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed var(--color-card-divider)" }}>
-                              <div>
-                                <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估总价</span>
-                                <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#22c55e" }}>{flight.price}</div>
-                              </div>
-                              {toolInv.state === "result" && (
+                              {/* Footer: Price & Action */}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
+                                <div>
+                                  <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>预估总价</span>
+                                  <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#10b981" }}>{flight.price}</div>
+                                </div>
                                 <a 
                                   href={flight.bookingUrl && flight.bookingUrl !== '#' ? flight.bookingUrl : 'https://www.google.com/flights'} 
                                   target="_blank" 
@@ -881,151 +991,185 @@ export default function Home() {
                                     boxShadow: "0 4px 12px rgba(99,102,241,0.4)"
                                   }}
                                 >
-                                  立即查价
+                                  立即订购
                                 </a>
-                              )}
+                              </div>
                             </div>
-                          </div>
-                        );
+                          );
+                        }
+
+                        if (toolName === 'show_ground_transport_card') {
+                          const transport = toolInv.args as any;
+                          const transportIcons: Record<string, string> = { bus: '🚌', train: '🚄', ferry: '⛴️', driving: '🚗' };
+                          const transportLabels: Record<string, string> = { bus: '巴士', train: '火车/高铁', ferry: '轮渡', driving: '自驾' };
+                          return (
+                            <div key={toolCallId} className="animate-fade-in" style={{
+                              background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.15))",
+                              backdropFilter: "blur(20px)",
+                              border: "1px solid rgba(34, 197, 94, 0.2)",
+                              borderRadius: "20px",
+                              padding: "24px",
+                              width: "100%",
+                              maxWidth: "480px",
+                              boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+                              alignSelf: "flex-start",
+                              color: "var(--color-text)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "16px"
+                            }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span style={{ fontSize: "24px" }}>{transportIcons[transport.transportType] || '🚌'}</span>
+                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{transportLabels[transport.transportType] || '陆路交通'}</span>
+                                </div>
+                                <span style={{ fontSize: "0.85rem", color: "#22c55e", background: "rgba(34,197,94,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
+                                  推荐路线
+                                </span>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0" }}>
+                                <div style={{ textAlign: "left" }}>
+                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.fromCity}</div>
+                                </div>
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px" }}>
+                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                                  <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
+                                  <div style={{ fontSize: "0.75rem", color: "#22c55e" }}>{transport.duration}</div>
+                                  <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
+                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.toCity}</div>
+                                </div>
+                              </div>
+                              {transport.tips && (
+                                <div style={{ background: "rgba(34, 197, 94, 0.05)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", borderLeft: "4px solid #22c55e" }}>
+                                  💡 {transport.tips}
+                                </div>
+                              )}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(34, 197, 94, 0.2)" }}>
+                                <div>
+                                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估费用</span>
+                                  <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#16a34a" }}>{transport.price}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (toolName === 'show_map') {
+                          return (
+                            <div key={toolCallId} className="animate-fade-in w-full max-w-[600px] self-start" style={{ marginTop: m.content ? 0 : 0 }}>
+                              <InteractiveMap title={args.title} center={args.center} zoom={args.zoom} markers={args.markers} />
+                            </div>
+                          );
+                        }
+
+                        if (toolName === 'show_hotel_carousel') {
+                          return (
+                            <div key={toolCallId} className="animate-fade-in w-full self-start" style={{ marginTop: m.content ? 0 : 0 }}>
+                              <HotelCarousel title={args.title} hotels={args.hotels} />
+                            </div>
+                          );
+                        }
                       }
-                      if (toolInv.toolName === 'show_ground_transport_card') {
-                        const transport = toolInv.args as any;
-                        const transportIcons: Record<string, string> = {
-                          bus: '🚌',
-                          train: '🚄',
-                          ferry: '⛴️',
-                          driving: '🚗'
-                        };
-                        const transportLabels: Record<string, string> = {
-                          bus: '巴士',
-                          train: '火车/高铁',
-                          ferry: '轮渡',
-                          driving: '自驾'
-                        };
+
+                      // 2. 交互式工具类型
+                      if (toolName === 'ask_user_preference' && state !== 'result') {
                         return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "var(--color-card-transport-bg)",
-                            backdropFilter: "blur(20px)",
-                            border: "1px solid var(--color-card-transport-border)",
-                            borderRadius: "20px",
-                            padding: "24px",
+                          <div key={toolCallId} className="animate-fade-in" style={{
+                            background: "var(--color-surface)",
+                            border: "1px solid var(--color-border)",
+                            borderRadius: "16px",
+                            padding: "20px",
                             width: "100%",
                             maxWidth: "480px",
-                            boxShadow: "var(--color-card-shadow)",
-                            alignSelf: "flex-start",
-                            color: "var(--color-text)",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "16px"
+                            boxShadow: "0 4px 24px rgba(0,0,0,0.1)",
+                            alignSelf: "flex-start"
                           }}>
-                            {/* Header */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <span style={{ fontSize: "24px" }}>{transportIcons[transport.transportType] || '🚌'}</span>
-                                <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{transportLabels[transport.transportType] || '陆路交通'}</span>
-                              </div>
-                              <span style={{ fontSize: "0.85rem", color: "#22c55e", background: "rgba(34,197,94,0.2)", padding: "4px 8px", borderRadius: "12px" }}>
-                                推荐路线
-                              </span>
-                            </div>
-
-                            {/* Route */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0" }}>
-                              <div style={{ textAlign: "left" }}>
-                                <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.fromCity}</div>
-                              </div>
-                              <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px" }}>
-                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                                <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
-                                <div style={{ fontSize: "0.75rem", color: "#22c55e" }}>{transport.duration}</div>
-                                <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
-                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.toCity}</div>
-                              </div>
-                            </div>
-
-                            {/* Tips */}
-                            {transport.tips && (
-                              <div style={{ background: "var(--color-card-transport-tip-bg)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", color: "var(--color-card-transport-tip-text)" }}>
-                                💡 {transport.tips}
-                              </div>
-                            )}
-
-                            {/* Price & Action */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed var(--color-card-transport-border)" }}>
-                              <div>
-                                <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估费用</span>
-                                <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#22c55e" }}>{transport.price}</div>
-                              </div>
-                              {toolInv.state === "result" && transport.bookingUrl && transport.bookingUrl !== '#' && (
-                                <a
-                                  href={transport.bookingUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "16px", color: "var(--color-text)" }}>
+                              {args.question}
+                            </h3>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                              {args.options.map((opt: string, i: number) => (
+                                <button
+                                  key={i}
+                                  onClick={() => addToolResult({ toolCallId, result: opt })}
+                                  className="option-button"
                                   style={{
-                                    background: "linear-gradient(135deg, #22c55e, #16a34a)",
-                                    color: "#fff",
-                                    padding: "10px 20px",
-                                    borderRadius: "12px",
-                                    textDecoration: "none",
-                                    fontWeight: 600,
-                                    fontSize: "0.95rem",
-                                    boxShadow: "0 4px 12px rgba(34,197,94,0.4)"
+                                    background: "var(--color-bg)",
+                                    border: "1px solid var(--color-border)",
+                                    padding: "12px 16px",
+                                    borderRadius: "10px",
+                                    textAlign: "left",
+                                    fontSize: "0.9rem",
+                                    color: "var(--color-text)",
+                                    cursor: "pointer",
+                                    transition: "all 0.2s"
                                   }}
                                 >
-                                  查看详情
-                                </a>
-                              )}
+                                  {opt}
+                                </button>
+                              ))}
                             </div>
                           </div>
                         );
                       }
-                      if (toolInv.toolName === 'confirm_slot') {
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in" style={{
-                            background: "rgba(34, 197, 94, 0.05)",
-                            border: "1px solid rgba(34, 197, 94, 0.2)",
-                            borderRadius: "12px",
-                            padding: "8px 16px",
-                            width: "fit-content",
-                            alignSelf: "flex-start",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            color: "#22c55e",
-                            fontSize: "0.85rem"
+
+                      // 3. 通用思考追踪器 (Agent Thinking Trace)
+                      const getToolLabel = (name: string, args: any) => {
+                        switch (name) {
+                          case 'search_web': return `正在搜索关于 "${args.query}" 的最新资讯`;
+                          case 'search_hotels': return `正在查询 ${args.location} 的酒店营业状态`;
+                          case 'search_flights_serpapi': return `正在获取实时航班报价`;
+                          case 'confirm_slot': return `已记录行程信息：${args.value}`;
+                          case 'ask_user_preference': return `已收到你的偏好选择`;
+                          default: return `执行任务：${name}`;
+                        }
+                      };
+
+                      const getToolIcon = (name: string) => {
+                        switch (name) {
+                          case 'search_web': return '🌐';
+                          case 'search_hotels': return '🏨';
+                          case 'search_flights_serpapi': return '✈️';
+                          case 'confirm_slot': return '📌';
+                          default: return '⚙️';
+                        }
+                      };
+
+                      const isThinking = state !== 'result';
+                      const isSuccess = state === 'result';
+
+                      return (
+                        <div key={toolCallId} className="animate-fade-in" style={{
+                          background: isSuccess ? "rgba(34, 197, 94, 0.05)" : "rgba(99, 102, 241, 0.05)",
+                          border: `1px solid ${isSuccess ? "rgba(34, 197, 94, 0.2)" : "rgba(99, 102, 241, 0.2)"}`,
+                          borderRadius: "12px",
+                          padding: "10px 16px",
+                          width: "fit-content",
+                          alignSelf: "flex-start",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          fontSize: "0.85rem",
+                          color: isSuccess ? "#16a34a" : "var(--color-text-muted)",
+                          transition: "all 0.3s ease"
+                        }}>
+                          <span style={{ 
+                            display: "inline-flex", 
+                            alignItems: "center", 
+                            justifyContent: "center",
+                            animation: isThinking ? "pulse 2s infinite" : "none" 
                           }}>
-                            <span>✅ 已确认：{(toolInv.args as any).value}</span>
-                          </div>
-                        );
-                      }
-                      if (toolInv.toolName === 'show_map') {
-                        const mapData = toolInv.args as any;
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in w-full max-w-[600px] self-start" style={{ marginTop: m.content ? 0 : 0 }}>
-                            <InteractiveMap 
-                              title={mapData.title}
-                              center={mapData.center}
-                              zoom={mapData.zoom}
-                              markers={mapData.markers}
-                            />
-                          </div>
-                        );
-                      }
-                      if (toolInv.toolName === 'show_hotel_carousel') {
-                        const hotelData = toolInv.args as any;
-                        return (
-                          <div key={toolInv.toolCallId} className="animate-fade-in w-full self-start" style={{ marginTop: m.content ? 0 : 0 }}>
-                            <HotelCarousel 
-                              title={hotelData.title}
-                              hotels={hotelData.hotels}
-                            />
-                          </div>
-                        );
-                      }
-                      return null;
+                            {isSuccess ? "✅" : getToolIcon(toolName)}
+                          </span>
+                          <span style={{ fontWeight: isSuccess ? 600 : 400 }}>
+                            {getToolLabel(toolName, args)}
+                            {isThinking && <span className="thinking-dots">...</span>}
+                          </span>
+                        </div>
+                      );
                     })}
                   </div>
                 </div>

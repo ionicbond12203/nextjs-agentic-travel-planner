@@ -62,7 +62,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 - show_flight_card：展示航班推荐
 - show_ground_transport_card：展示陆路交通推荐
 - show_hotel_carousel：展示酒店推荐（至少 3 个选项）
-- show_map：标注关键位置
+- show_map：标注关键位置。注意：在标注具体景点或酒店前，必须先调用 search_place_coordinates 获取精准的 lat/lng 坐标。
 `;
 
   // 状态上下文

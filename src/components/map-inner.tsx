@@ -66,7 +66,7 @@ const MapInner: React.FC<MapInnerProps> = ({
                   borderRadius: "50%", 
                   border: "2px solid white", 
                   boxShadow: "0 0 10px rgba(0,0,0,0.3)",
-                  transform: "translate(-50%, -50%)"
+                  transform: "translateY(50%)"
                 }} />
                 {openInfoWindow === key && (
                   <InfoWindow
