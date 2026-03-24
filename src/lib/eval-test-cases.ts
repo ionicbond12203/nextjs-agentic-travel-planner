@@ -210,5 +210,31 @@ export const EVAL_TEST_CASES: EvalTestCase[] = [
       answerRelevance: { min: 0.8, max: 1.0 },
     },
   },
+  {
+    caseName: "nordic_luxury_itinerary",
+    description: "Multi-country Nordic luxury trip with specific 2026 pricing and real-time flight data",
+    trace: {
+      userQuery: "我想去欧洲北欧自由行，11-14天，奢华度假型，6月出发，从吉隆坡出发",
+      retrievedContexts: [
+        "Emirates KUL-CPH June 2026: EK 航班, 17h, MYR 3,141. Source: Emirates Official.",
+        "Nimb Hotel Copenhagen: 5-star luxury next to Tivoli, Open June 2026, €450/night (~RM2,160).",
+        "Grand Hôtel Stockholm: 5-star, Open June 2026, SEK 3,200/night (~RM1,280).",
+        "The Thief Oslo: 5-star, Open June 2026, NOK 2,800/night (~RM1,120).",
+        "DSB Train CPH-STO: 5h, €85 (~RM408). Vy Train STO-OSL: 6h, €95 (~RM456).",
+      ],
+      llmAnswer:
+        "为您规划11-14天北欧奢华之旅：\n✈️ 航班：阿联酋航空 KUL-CPH 往返 MYR 3,141\n🏨 住宿：哥本哈根 Nimb Hotel (€450/晚), 斯德哥尔摩 Grand Hôtel (SEK 3,200/晚), 奥斯陆 The Thief (NOK 2,800/晚)\n🚂 交通：跨国豪华列车 CPH-STO-OSL\n（数据查自 2026 实时搜索，已包含汇率换算）",
+      toolCalls: [
+        { toolName: "search_flights_serpapi", args: { departure_id: "KUL", arrival_id: "CPH" } },
+        { toolName: "search_hotels", args: { location: "Copenhagen", budget_category: "luxury" } },
+      ],
+    },
+    expectedScores: {
+      contextRelevance: { min: 0.8, max: 1.0 },
+      groundedness: { min: 0.8, max: 1.0 },
+      answerRelevance: { min: 0.8, max: 1.0 },
+      factuality: { min: 0.8, max: 1.0 },
+    },
+  },
 ];
 
