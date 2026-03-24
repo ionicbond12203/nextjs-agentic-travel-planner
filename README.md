@@ -4,12 +4,27 @@ A modern, Agentic Retrieval-Augmented Generation (RAG) travel planning applicati
 
 ## Features
 
-- **Agentic Conversational State**: Dynamically extracts user preferences (Origin, Destination, Duration, Style) through slot-filling without rigid forms.
+- **Agentic RAG (Self-Correction)**: Implements **Corrective RAG (CRAG)** patterns. The agent evaluates search results in real-time; if relevance is low, it automatically rewrites the query and re-retrieves data.
+- **Self-Reflection (Self-RAG)**: Features a built-in "Judge" that audits generated answers for groundedness and factuality, specifically blocking common travel hallucinations (e.g., visa policies).
+- **Evaluation Framework (LLM-as-a-Judge)**: A robust batch testing suite using the **RAG Triad** (Context Relevance, Groundedness, Answer Relevance) plus a specialized **Factuality** metric.
 - **Generative UI (GenUI)**: Instead of raw text, the AI streams interactive React components (Option Cards, Flight Cards, Transport Recommenders) directly into the chat interface.
-- **Real-Time Data (RAG)**: Integrates Tavily Search API for up-to-date attraction hours and ticket pricing.
+- **Real-Time Data (RAG)**: Integrates Tavily Search API with 2026 freshness filters for up-to-date attraction info.
 - **Flight Prices**: Connects to the Google Flights API via SerpApi for accurate, real-world flight recommendations.
-- **Smart Context & Localization**: Implicitly handles currency conversions, non-EEA tourist pricing (for Malaysian/international users) at EU attractions (e.g., the Louvre), and distance-based transport fallbacks.
-- **Local LLM Support**: Designed to run seamlessly with local models via Ollama (e.g., Qwen 3.5).
+- **Local LLM Support**: Designed for high-performance use with local models via Ollama (e.g., Qwen 3.5 / Gemini 1.5 Flash).
+
+## Evaluation
+
+The project includes a comprehensive evaluation suite to prevent regressions and improve agent accuracy.
+
+### Running Evaluations
+
+Ensure your dev server is running, then execute:
+
+```bash
+npm run eval
+```
+
+This runs a batch of test cases (defined in `src/lib/eval-test-cases.ts`) through the judge and outputs a detailed report on context relevance, groundedness, and factuality.
 
 ## Tech Stack
 
