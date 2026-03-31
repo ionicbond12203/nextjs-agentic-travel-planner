@@ -29,39 +29,60 @@ function getSessionId(req: Request): string {
   return `${ip}-${ua}`.slice(0, 64);
 }
 
-function getFastIntent(message: string, state: DialogueState): string | null {
-  const content = message.toLowerCase();
-  if (/^(hi|hello|hey|你好|您好|哈喽|早上好|下午好|在吗)/i.test(content) && content.length < 15) {
-    return 'general_chat';
+async function getOrchestratorIntent(messages: any[], state: DialogueState, model: any): Promise<'FLIGHT_AGENT' | 'HOTEL_AGENT' | 'PLANNER_AGENT' | 'GENERAL_CHAT' | 'OUT_OF_SCOPE' | 'RESTRICTED'> {
+  const lastMsg = messages[messages.length - 1];
+  const content = lastMsg.content || "";
+  
+  if (/(暴力|色情|毒品|自杀|枪支|炸药|非法|赌博|vpn|翻墙)/i.test(content)) return 'OUT_OF_SCOPE';
+  if (/^(hi|hello|hey|你好|您好|哈喽|早上好|下午好|在吗)/i.test(content) && content.length < 15) return 'GENERAL_CHAT';
+  
+  const restrictionError = checkTravelRestrictions(state.slots.originCity || 'KUL', content);
+  if (restrictionError) return 'RESTRICTED';
+
+  const system = `You are an Orchestrator for a travel booking swarm.
+Your job is to classify the user's latest message into one of the following Agent Roles:
+- FLIGHT_AGENT: User explicitly wants to search or book flights, airplanes, tickets.
+- HOTEL_AGENT: User explicitly wants to search or book hotels, accommodations, places to stay.
+- PLANNER_AGENT: User is providing preferences, asking general travel questions, or asking about ground transport/maps.
+
+Only output the exact ROLE string, nothing else.`;
+
+  try {
+    const { text } = await generateText({
+      model,
+      system,
+      prompt: content,
+      maxTokens: 10,
+    });
+    const result = text.trim().toUpperCase() as any;
+    if (['FLIGHT_AGENT', 'HOTEL_AGENT', 'PLANNER_AGENT'].includes(result)) return result;
+    return 'PLANNER_AGENT';
+  } catch (e) {
+    if (content.includes('航班') || content.includes('飞机') || content.includes('机票') || content.includes('flight')) return 'FLIGHT_AGENT';
+    if (content.includes('酒店') || content.includes('住宿') || content.includes('饭店') || content.includes('hotel')) return 'HOTEL_AGENT';
+    return 'PLANNER_AGENT';
   }
-  if (content.includes('航班') || content.includes('飞机') || content.includes('机票') || content.includes('flight')) {
-    return 'flight_inquiry';
-  }
-  if (state.stage === 'collecting' && (content.includes('天') || content.includes('风格') || content.includes('去') || content.length < 10)) {
-    return 'travel_planning';
-  }
-  if (/(暴力|色情|毒品|自杀|枪支|炸药|非法|赌博|vpn|翻墙)/i.test(content)) {
-    return 'out_of_scope';
-  }
-  let origin = state.slots.originCity;
-  if (!origin) {
-    if (/(吉隆坡|kl|kuala lumpur|malaysia|马来西亚)/i.test(content)) {
-      origin = 'KUL';
-    }
-  }
-  const restrictionError = checkTravelRestrictions(origin, content);
-  if (restrictionError) {
-    return 'restricted_travel';
-  }
-  return null;
 }
 
-function pruneMessages(messages: any[]): any[] {
+async function compactContext(messages: any[]): Promise<any[]> {
   if (messages.length < 15) return messages;
   const systemMsg = messages[0];
   const initialUserMsg = messages[1];
-  const recentMessages = messages.slice(-12);
-  return [systemMsg, initialUserMsg, ...recentMessages];
+  
+  // Cut out the middle messages for summarization. Keep last 7 messages intact.
+  const recentMessages = messages.slice(-7);
+  const oldMessages = messages.slice(2, -7);
+  
+  const chatLog = oldMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+  
+  const { text: summary } = await generateText({
+    model: cloudModel,
+    system: "You are a context compression engine for a travel planning AI. Summarize the following chat log to extract all travel constraints, locations, preferences, budgets, and discussed itineraries. Keep it extremely concise but do not lose facts. Always extract confirmed numbers and locations.",
+    prompt: chatLog,
+  });
+
+  const compactMsg = { role: 'system', content: `[COMPACTED_MEMORY] Summary of earlier conversation:\n${summary}` };
+  return [systemMsg, initialUserMsg, compactMsg, ...recentMessages];
 }
 
 function syncDialogueState(messages: any[], state: DialogueState): DialogueState {
@@ -104,15 +125,28 @@ function syncDialogueState(messages: any[], state: DialogueState): DialogueState
 }
 
 export async function POST(req: Request) {
-  const { messages, language = 'en' } = await req.json();
+  const { id = '', messages, language = 'en' } = await req.json();
   const sanitizedMessages = messages.map((m: any) => ({ ...m }));
-  const sessionId = getSessionId(req);
+  
+  // Use user IP + Chat ID (if provided) to isolate session, or fallback to simple IP
+  const baseSessionId = getSessionId(req);
+  const sessionId = id ? `${baseSessionId}-${id}` : baseSessionId;
+  
   let state = (await getSession(sessionId)) || initDialogueState();
+
+  // Reset dialogue memory if this is the very first message of the chat
+  if (sanitizedMessages.length <= 1) {
+    state = initDialogueState();
+  }
+
   const country = req.headers.get('x-vercel-ip-country') || 'Malaysia (MYR)';
   const currentDateTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const currentYear = new Date().getFullYear();
 
   state = syncDialogueState(sanitizedMessages, state);
+
+  let intent = await getOrchestratorIntent(sanitizedMessages, state, cloudModel);
+  let agentRole: any = ['FLIGHT_AGENT', 'HOTEL_AGENT', 'PLANNER_AGENT', 'GENERAL_CHAT'].includes(intent) ? intent : 'PLANNER_AGENT';
 
   const baseSystemPrompt = buildSystemPrompt({
     state,
@@ -120,21 +154,12 @@ export async function POST(req: Request) {
     currentYear,
     userCountry: country,
     language: language as 'en' | 'zh',
+    agentRole: agentRole,
   });
 
   const lastMsg = sanitizedMessages[sanitizedMessages.length - 1];
   const lastMsgContent = lastMsg.content || "";
-  let intent: string;
   let activeTools: any = {};
-
-  const fastIntent = getFastIntent(lastMsgContent, state);
-  if (fastIntent) {
-    intent = fastIntent;
-  } else if (lastMsg.role === 'tool' && (lastMsg.toolName === 'ask_user_preference' || lastMsg.toolName === 'confirm_slot')) {
-    intent = 'travel_planning';
-  } else {
-    intent = 'travel_planning';
-  }
 
   // --- Tool Definitions ---
   const ask_user_preference = tool({
@@ -296,81 +321,101 @@ export async function POST(req: Request) {
     execute: async () => ({ success: true })
   } as any);
 
-  // --- Logic Routing ---
   let finalSystemPrompt = baseSystemPrompt;
-  if (intent === 'out_of_scope') {
-    finalSystemPrompt = "拒绝非旅游话题。";
-  } else if (intent === 'restricted_travel') {
+  if (intent === 'OUT_OF_SCOPE') {
+    finalSystemPrompt = "拒绝回答此问题。包含不良内容。";
+  } else if (intent === 'RESTRICTED') {
     activeTools = {};
     const restrictionError = checkTravelRestrictions(state.slots.originCity, lastMsgContent) || "受限行程。";
     finalSystemPrompt = `给出警告：${restrictionError}`;
-  } else if (intent === 'general_chat') {
+  } else if (intent === 'GENERAL_CHAT') {
     activeTools = {};
-    finalSystemPrompt = "闲聊模式。";
+    finalSystemPrompt = "闲聊模式。如果用户想聊天就回复友好，反之立即转移话题到旅游。";
   } else {
-    activeTools = { ask_user_preference, confirm_slot, show_map, search_web, search_place_coordinates };
-    if (state.slots.travelStyle && !state.slots.travelStyle.includes('跟团')) {
-      activeTools.search_hotels = search_hotels;
-      activeTools.show_ground_transport_card = show_ground_transport_card;
-      activeTools.show_hotel_carousel = show_hotel_carousel;
+    if (intent === 'FLIGHT_AGENT') {
+      activeTools = { search_flights_serpapi, show_flight_card, search_web };
+      finalSystemPrompt += "\n【航班查询专属】务必立即使用 search_flights_serpapi 结合已知目的地进行查票，并使用 show_flight_card 呈现机票。";
+    } else if (intent === 'HOTEL_AGENT') {
+      activeTools = { search_hotels, show_hotel_carousel, search_web };
+      finalSystemPrompt += "\n【订房验证专属】核实日期后，优先检索酒店信息，确保 is_open 后用 show_hotel_carousel 输出推荐。";
+    } else {
+      activeTools = { ask_user_preference, confirm_slot, show_map, search_web, search_place_coordinates, show_ground_transport_card };
+      finalSystemPrompt += "\n【槽位提取约束】若提取到新信息，必须立即调用 confirm_slot 记录！如果用户想预订机票住宿，安抚他们并收集偏好。";
     }
-    if (canSearchFlights(state)) {
-      activeTools.search_flights_serpapi = search_flights_serpapi;
-      activeTools.show_flight_card = show_flight_card;
-      finalSystemPrompt += "\n【航班查询已解锁】如果用户同意或主动要求查询航班，请立即调用 search_flights_serpapi 获取实时数据。";
-    }
-    finalSystemPrompt += "\n【槽位提取约束】若提取到新信息，必须立即调用 confirm_slot 记录！";
   }
 
-  const processedMessages = pruneMessages(sanitizedMessages);
+  const processedMessages = await compactContext(sanitizedMessages);
   const data = new StreamData();
 
-  const result = await streamText({
-    model: cloudModel,
-    messages: processedMessages,
-    system: finalSystemPrompt,
-    maxSteps: 10,
-    maxTokens: 4096,
-    tools: activeTools,
-    onFinish: async ({ text, toolResults }) => {
-      await setSession(sessionId, state);
-      let factualityScore = 1.0;
-      if (text) {
-        const actualUserQuery = (sanitizedMessages as any[]).filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
-        const factuality = await gradeFactuality(actualUserQuery, text);
-        factualityScore = factuality.score;
-      }
-
-      // Captured Trace for Evaluation
-      if (process.env.ENABLE_RAG_EVAL === 'true') {
+  try {
+    const result = await streamText({
+      model: cloudModel,
+      messages: processedMessages,
+      system: finalSystemPrompt,
+      maxSteps: 10,
+      maxTokens: 4096,
+      tools: activeTools,
+      onFinish: async ({ text, toolResults }) => {
         try {
-          const retrievedContexts: string[] = [];
-          const traceToolCalls: any[] = [];
-          if (toolResults) {
-            for (const tr of toolResults as any[]) {
-              const res = tr.result;
-              if (res?.answer) retrievedContexts.push(res.answer);
-              traceToolCalls.push({ toolName: tr.toolName, args: tr.args, result: JSON.stringify(res).slice(0, 500) });
+          // Do not await session saving to prevent hanging the response
+          setSession(sessionId, state).catch(e => console.error('Session save error:', e));
+          
+          let factualityScore = 1.0;
+          if (text) {
+            try {
+              const actualUserQuery = (sanitizedMessages as any[]).filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
+              
+              // 5-second timeout for factuality grading to prevent stream hanging
+              const gradingPromise = gradeFactuality(actualUserQuery, text);
+              const timeoutPromise = new Promise<{ score: number }>((_, reject) => setTimeout(() => reject(new Error('Grade timeout')), 5000));
+              const factuality = await Promise.race([gradingPromise, timeoutPromise]);
+              
+              factualityScore = factuality.score;
+            } catch (e) {
+              console.warn('Factuality eval skipped/error:', e);
             }
           }
-          const actualUserQuery = (sanitizedMessages as any[]).filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
-          const ragTrace: RagTrace = {
-            userQuery: actualUserQuery,
-            retrievedContexts,
-            llmAnswer: text || '',
-            toolCalls: traceToolCalls,
-            timestamp: new Date().toISOString(),
-            sessionId,
-          };
-          const redis = getRedis();
-          await redis.set(`eval:trace:${sessionId}:${Date.now()}`, JSON.stringify(ragTrace), 'EX', 86400);
-        } catch (e) { }
+
+          if (process.env.ENABLE_RAG_EVAL === 'true') {
+            try {
+              const retrievedContexts: string[] = [];
+              const traceToolCalls: any[] = [];
+              if (toolResults) {
+                for (const tr of toolResults as any[]) {
+                  const res = tr.result;
+                  if (res?.answer) retrievedContexts.push(res.answer);
+                  traceToolCalls.push({ toolName: tr.toolName, args: tr.args, result: JSON.stringify(res).slice(0, 500) });
+                }
+              }
+              const actualUserQuery = (sanitizedMessages as any[]).filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
+              const ragTrace: RagTrace = {
+                userQuery: actualUserQuery,
+                retrievedContexts,
+                llmAnswer: text || '',
+                toolCalls: traceToolCalls,
+                timestamp: new Date().toISOString(),
+                sessionId,
+              };
+              const redis = getRedis();
+              // Do not await trace recording
+              redis.set(`eval:trace:${sessionId}:${Date.now()}`, JSON.stringify(ragTrace), 'EX', 86400).catch(e => console.error('Trace save error:', e));
+            } catch (e) {
+              console.error('Trace capture error:', e);
+            }
+          }
+
+          data.append({ factualityScore });
+        } finally {
+          data.close();
+        }
       }
+    });
 
-      data.append({ factualityScore });
-      data.close();
-    }
-  });
-
-  return result.toDataStreamResponse({ data });
+    return result.toDataStreamResponse({ data });
+  } catch (error) {
+    // If anything throws before the stream completes properly, force close it.
+    console.error('Error during AI streaming setup:', error);
+    data.close();
+    return new Response(JSON.stringify({ error: 'AI Streaming Error' }), { status: 500 });
+  }
 }
