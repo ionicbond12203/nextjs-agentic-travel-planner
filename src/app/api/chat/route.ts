@@ -104,7 +104,7 @@ function syncDialogueState(messages: any[], state: DialogueState): DialogueState
 }
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  const { messages, language = 'en' } = await req.json();
   const sanitizedMessages = messages.map((m: any) => ({ ...m }));
   const sessionId = getSessionId(req);
   let state = (await getSession(sessionId)) || initDialogueState();
@@ -119,6 +119,7 @@ export async function POST(req: Request) {
     currentDateTime,
     currentYear,
     userCountry: country,
+    language: language as 'en' | 'zh',
   });
 
   const lastMsg = sanitizedMessages[sanitizedMessages.length - 1];

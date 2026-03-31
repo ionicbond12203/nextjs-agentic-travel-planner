@@ -16,19 +16,26 @@ export interface PromptContext {
   currentDateTime: string;
   currentYear: number;
   userCountry: string;
+  language: 'en' | 'zh';
 }
 
 /**
  * 构建完整的系统提示词
  */
 export function buildSystemPrompt(ctx: PromptContext): string {
-  const { state, currentDateTime, currentYear, userCountry } = ctx;
+  const { state, currentDateTime, currentYear, userCountry, language } = ctx;
+
+  const langInstruction = language === 'zh' 
+    ? "你必须全程使用【中文】进行回复。保持回复内容的专业性、亲和力，并善用 emoji。"
+    : "You MUST respond entirely in 【English】. Maintain a professional yet friendly tone, and use emojis appropriately.";
 
   // 计算默认未来出行日期（两周后）
   const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   // 基础提示
   const basePrompt = `你是一位专业的旅游规划AI助手。
+
+${langInstruction}
 
 当前真实时间：${currentDateTime}（${currentYear}年）
 默认行程日期（若用户未指定）：${futureDate}

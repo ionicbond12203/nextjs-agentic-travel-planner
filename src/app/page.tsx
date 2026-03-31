@@ -45,12 +45,84 @@ function saveActiveId(id: string) {
   localStorage.setItem(LS_ACTIVE, id);
 }
 
-const SUGGESTIONS = [
-  "我想去欧洲旅行 🌍",
-  "推荐东南亚预算友好的旅行路线",
-  "日本两周深度游攻略",
-  "适合家庭的海岛度假推荐",
-];
+type Language = "en" | "zh";
+
+const DICTIONARY = {
+  en: {
+    title: "Travel Planner",
+    subtitle: "Powered by Ollama · glm-5",
+    online: "Online",
+    newChat: "New Chat",
+    welcomeTitle: "Your Personal Travel Planner",
+    welcomeSubtitle: "Tell me where you want to go and I'll craft the perfect journey for you.",
+    inputPlaceholder: "Plan your next journey... (e.g. 2 weeks in Japan)",
+    disclaimer: "AI-generated content for reference only · Verify critical bookings independently",
+    suggestions: [
+      "I want to travel to Europe 🌍",
+      "Recommend budget-friendly routes in SE Asia",
+      "2-week Japan in-depth itinerary",
+      "Island vacation recommendations for families",
+    ],
+    verified: "Verified",
+    consensus: "Agentic Consensus Achieved",
+    estBudget: "Estimated Budget",
+    ready: "Ready for planning",
+    voyageBrief: "Voyage Brief",
+    flightHeader: "Flight Recommendation",
+    bookNow: "Book Now",
+    groundTransport: "Ground Transport",
+    recommendedRoute: "Recommended Route",
+    thinking: "Thinking...",
+    send: "Send ➤",
+    factVerified: "Fact Verified",
+    auditPassed: "Agentic RAG Audit Passed",
+    pending: "Pending...",
+    voyagePlan: "My Voyage Plan",
+    departure: "Origin",
+    destinationLabel: "Destination",
+    duration: "Duration",
+    style: "Style",
+    totalEst: "Total Est. Budget 💰",
+    readyToPlan: "✅ Ready to plan your trip",
+  },
+  zh: {
+    title: "旅游规划师",
+    subtitle: "Powered by Ollama · glm-5",
+    online: "在线",
+    newChat: "新对话",
+    welcomeTitle: "你的专属旅游规划师",
+    welcomeSubtitle: "告诉我你想去哪里旅行，我会根据你的偏好为你量身定制完美行程攻略",
+    inputPlaceholder: "告诉我你的旅行计划... 比如：我想去日本两周",
+    send: "发送 ➤",
+    thinking: "思考中...",
+    disclaimer: "AI 生成的内容仅供参考，请务必自行核实关键信息",
+    suggestions: [
+      "我想去欧洲旅行 🌍",
+      "推荐东南亚预算友好的旅行路线",
+      "日本两周深度游攻略",
+      "适合家庭的海岛度假推荐",
+    ],
+    verified: "已验证",
+    consensus: "Agentic 共识已达成",
+    estBudget: "预估费用",
+    ready: "已准备好规划",
+    voyageBrief: "行程简报",
+    flightHeader: "航班推荐",
+    bookNow: "立即订购",
+    groundTransport: "陆路交通",
+    recommendedRoute: "推荐路线",
+    factVerified: "已验证事实",
+    auditPassed: "Agentic RAG 思维审计已通过",
+    pending: "待确认...",
+    voyagePlan: "我的行程计划",
+    departure: "出发城市",
+    destinationLabel: "目的地",
+    duration: "行程天数",
+    style: "旅行风格",
+    totalEst: "预估总支出 💰",
+    readyToPlan: "✅ 已准备好为您规划细节",
+  }
+};
 
 /* ─── Components ─── */
 
@@ -61,7 +133,7 @@ function BriefItem({ label, value, icon }: { label: string, value?: string, icon
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
         <div style={{ fontSize: "0.85rem", color: value ? "var(--color-text)" : "var(--color-text-muted)", fontWeight: value ? 600 : 400 }}>
-          {value || "待确认..."}
+          {value || (label === "Origin" || label === "出发城市" ? "Pending..." : "Pending...")}
         </div>
       </div>
       {value && <span style={{ color: "#22c55e", fontSize: "0.8rem" }}>✓</span>}
@@ -71,11 +143,18 @@ function BriefItem({ label, value, icon }: { label: string, value?: string, icon
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
+  const [language, setLanguage] = useState<Language>("en");
+  
+  const t = useCallback(<T extends keyof typeof DICTIONARY["en"]>(key: T): typeof DICTIONARY["en"][T] => {
+    return DICTIONARY[language][key];
+  }, [language]);
+
   const initialMessages = useMemo(() => [], []);
   const chatOptions = useMemo(() => ({
     api: "/api/chat",
     initialMessages,
-  }), [initialMessages]);
+    body: { language },
+  }), [initialMessages, language]);
 
   const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, addToolResult, data } =
     useChat(chatOptions);
@@ -512,7 +591,7 @@ export default function Home() {
             backdropFilter: "blur(10px)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--color-text)" }}>📍 我的行程计划</span>
+              <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--color-text)" }}>📍 {t("voyagePlan")}</span>
               <button 
                 onClick={() => setShowBrief(false)}
                 style={{ background: "transparent", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "1.1rem" }}
@@ -520,10 +599,10 @@ export default function Home() {
             </div>
             
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <BriefItem label="出发城市" value={slots.originCity} icon="🏠" />
-              <BriefItem label="目的地" value={slots.destination} icon="✈️" />
-              <BriefItem label="行程天数" value={slots.tripDuration} icon="⏱️" />
-              <BriefItem label="旅行风格" value={slots.travelStyle} icon="✨" />
+              <BriefItem label={t("departure") as string} value={slots.originCity} icon="🏠" />
+              <BriefItem label={t("destinationLabel") as string} value={slots.destination} icon="✈️" />
+              <BriefItem label={t("duration") as string} value={slots.tripDuration} icon="⏱️" />
+              <BriefItem label={t("style") as string} value={slots.travelStyle} icon="✨" />
             </div>
 
             {totalBudget > 0 && (
@@ -537,7 +616,7 @@ export default function Home() {
                 flexDirection: "column",
                 gap: "4px"
               }}>
-                <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600 }}>预估总支出 💰</div>
+                <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600 }}>{t("totalEst")}</div>
                 <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--color-accent)" }}>
                    ~ {totalBudget.toLocaleString()} <span style={{ fontSize: "0.8rem", fontWeight: 500 }}>{slots.originCity?.includes('KUL') ? 'MYR' : 'USD'}</span>
                 </div>
@@ -556,7 +635,7 @@ export default function Home() {
                 fontWeight: 700,
                 border: "1px solid rgba(34, 197, 94, 0.3)"
               }}>
-                ✅ 已准备好为您规划细节
+                {t("readyToPlan")}
               </div>
             )}
           </div>
@@ -669,7 +748,7 @@ export default function Home() {
                 lineHeight: 1.2,
               }}
             >
-              旅游 AI 规划师
+              {t("title")}
             </h1>
             <span
               style={{
@@ -677,7 +756,7 @@ export default function Home() {
                 color: "var(--color-text-muted)",
               }}
             >
-              Powered by Ollama · qwen3
+              {t("subtitle")}
             </span>
           </div>
           <div
@@ -698,12 +777,32 @@ export default function Home() {
               }}
             />
             <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-              在线
+              {t("online")}
             </span>
+            
+            {/* Language Toggle */}
+            <button
+              onClick={() => setLanguage(prev => prev === "en" ? "zh" : "en")}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                padding: "4px 8px",
+                borderRadius: "8px",
+                color: "var(--color-text)",
+                marginLeft: "8px",
+                transition: "all 0.2s",
+              }}
+            >
+              {language === "en" ? "中文" : "EN"}
+            </button>
+
             {/* New chat shortcut in header */}
             <button
               onClick={handleNewChat}
-              title="新对话"
+              title={t("newChat")}
               style={{
                 background: "transparent",
                 border: "1px solid var(--color-border)",
@@ -764,7 +863,7 @@ export default function Home() {
                   marginBottom: "8px",
                 }}
               >
-                你的专属旅游规划师
+                {t("welcomeTitle")}
               </h2>
               <p
                 style={{
@@ -773,7 +872,7 @@ export default function Home() {
                   maxWidth: "480px",
                 }}
               >
-                告诉我你想去哪里旅行，我会根据你的偏好为你量身定制完美行程攻略
+                {t("welcomeSubtitle")}
               </p>
             </div>
 
@@ -787,7 +886,7 @@ export default function Home() {
                 width: "100%",
               }}
             >
-              {SUGGESTIONS.map((text, i) => (
+              {(t("suggestions")).map((text, i) => (
                 <button
                   key={i}
                   className="option-card"
@@ -908,9 +1007,9 @@ export default function Home() {
                               borderRadius: "4px",
                               fontWeight: 600
                             }}>
-                              <span style={{ fontSize: "0.8rem" }}>🛡️</span> 已验证事实
+                              <span style={{ fontSize: "0.8rem" }}>🛡️</span> {t("factVerified")}
                             </div>
-                            <span>Agentic RAG 思维审计已通过</span>
+                            <span>{t("auditPassed")}</span>
                           </div>
                         )}
                       </div>
@@ -973,7 +1072,7 @@ export default function Home() {
                               {/* Footer: Price & Action */}
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
                                 <div>
-                                  <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>预估总价</span>
+                                  <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>{t("estBudget")}</span>
                                   <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#10b981" }}>{flight.price}</div>
                                 </div>
                                 <a 
@@ -991,7 +1090,7 @@ export default function Home() {
                                     boxShadow: "0 4px 12px rgba(99,102,241,0.4)"
                                   }}
                                 >
-                                  立即订购
+                                  {t("bookNow")}
                                 </a>
                               </div>
                             </div>
@@ -1021,10 +1120,10 @@ export default function Home() {
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                   <span style={{ fontSize: "24px" }}>{transportIcons[transport.transportType] || '🚌'}</span>
-                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{transportLabels[transport.transportType] || '陆路交通'}</span>
+                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{language === 'zh' ? (transportLabels[transport.transportType] || '陆路交通') : (transport.transportType?.toUpperCase() || 'TRANSPORT')}</span>
                                 </div>
                                 <span style={{ fontSize: "0.85rem", color: "#22c55e", background: "rgba(34,197,94,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
-                                  推荐路线
+                                  {t("recommendedRoute")}
                                 </span>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0" }}>
@@ -1049,7 +1148,7 @@ export default function Home() {
                               )}
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(34, 197, 94, 0.2)" }}>
                                 <div>
-                                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>预估费用</span>
+                                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>{t("estBudget")}</span>
                                   <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#16a34a" }}>{transport.price}</div>
                                 </div>
                               </div>
@@ -1118,13 +1217,24 @@ export default function Home() {
 
                       // 3. 通用思考追踪器 (Agent Thinking Trace)
                       const getToolLabel = (name: string, args: any) => {
-                        switch (name) {
-                          case 'search_web': return `正在搜索关于 "${args.query}" 的最新资讯`;
-                          case 'search_hotels': return `正在查询 ${args.location} 的酒店营业状态`;
-                          case 'search_flights_serpapi': return `正在获取实时航班报价`;
-                          case 'confirm_slot': return `已记录行程信息：${args.value}`;
-                          case 'ask_user_preference': return `已收到你的偏好选择`;
-                          default: return `执行任务：${name}`;
+                        if (language === 'zh') {
+                          switch (name) {
+                            case 'search_web': return `正在搜索关于 "${args.query}" 的最新资讯`;
+                            case 'search_hotels': return `正在查询 ${args.location} 的酒店营业状态`;
+                            case 'search_flights_serpapi': return `正在获取实时航班报价`;
+                            case 'confirm_slot': return `已记录行程信息：${args.value}`;
+                            case 'ask_user_preference': return `已收到你的偏好选择`;
+                            default: return `执行任务：${name}`;
+                          }
+                        } else {
+                          switch (name) {
+                            case 'search_web': return `Searching for latest info on "${args.query}"`;
+                            case 'search_hotels': return `Checking hotel status in ${args.location}`;
+                            case 'search_flights_serpapi': return `Fetching real-time flight quotes`;
+                            case 'confirm_slot': return `Recorded event: ${args.value}`;
+                            case 'ask_user_preference': return `Preference received`;
+                            default: return `Task: ${name}`;
+                          }
                         }
                       };
 
@@ -1242,7 +1352,7 @@ export default function Home() {
             ref={inputRef}
             value={input}
             onChange={handleInputChange}
-            placeholder="告诉我你的旅行计划... 比如：我想去日本两周"
+            placeholder={t("inputPlaceholder")}
             disabled={isLoading}
             style={{
               flex: 1,
@@ -1281,7 +1391,7 @@ export default function Home() {
               whiteSpace: "nowrap",
             }}
           >
-            {isLoading ? "思考中..." : "发送 ➤"}
+            {isLoading ? t("thinking") : t("send")}
           </button>
         </form>
         <p
@@ -1292,7 +1402,7 @@ export default function Home() {
             marginTop: "8px",
           }}
         >
-          AI 生成的内容仅供参考，请务必自行核实关键信息
+          {t("disclaimer")}
         </p>
       </div>
       </div>
