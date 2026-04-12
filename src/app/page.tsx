@@ -86,7 +86,7 @@ const DICTIONARY = {
     readyToPlan: "✅ Ready to plan your trip",
   },
   zh: {
-    title: "旅游规划师",
+    title: "Travel planner",
     subtitle: "Powered by Ollama · glm-5",
     online: "在线",
     newChat: "新对话",
@@ -144,7 +144,7 @@ function BriefItem({ label, value, icon }: { label: string, value?: string, icon
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
-  
+
   const t = useCallback(<T extends keyof typeof DICTIONARY["en"]>(key: T): typeof DICTIONARY["en"][T] => {
     return DICTIONARY[language][key];
   }, [language]);
@@ -320,14 +320,14 @@ export default function Home() {
 
   const handleClearAllSessions = useCallback(() => {
     if (!window.confirm("确定要清空所有聊天记录吗？此操作不可撤销。")) return;
-    
+
     localStorage.removeItem(LS_SESSIONS);
     localStorage.removeItem(LS_ACTIVE);
-    
+
     setSessions([]);
     setMessages([]);
     setHasStarted(false);
-    
+
     const newId = genId();
     setSessionId(newId);
     saveActiveId(newId);
@@ -570,7 +570,7 @@ export default function Home() {
 
       {/* ═══ Main content ═══ */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
-        
+
         {/* Travel Brief (Floating Dashboard) */}
         {hasStarted && (
           <div style={{
@@ -592,12 +592,12 @@ export default function Home() {
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--color-text)" }}>📍 {t("voyagePlan")}</span>
-              <button 
+              <button
                 onClick={() => setShowBrief(false)}
                 style={{ background: "transparent", border: "none", color: "var(--color-text-muted)", cursor: "pointer", fontSize: "1.1rem" }}
               >✕</button>
             </div>
-            
+
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <BriefItem label={t("departure") as string} value={slots.originCity} icon="🏠" />
               <BriefItem label={t("destinationLabel") as string} value={slots.destination} icon="✈️" />
@@ -606,11 +606,11 @@ export default function Home() {
             </div>
 
             {totalBudget > 0 && (
-              <div style={{ 
-                marginTop: "4px", 
-                padding: "12px", 
-                borderRadius: "12px", 
-                background: "var(--color-bg)", 
+              <div style={{
+                marginTop: "4px",
+                padding: "12px",
+                borderRadius: "12px",
+                background: "var(--color-bg)",
                 border: "1px dashed var(--color-border)",
                 display: "flex",
                 flexDirection: "column",
@@ -618,18 +618,18 @@ export default function Home() {
               }}>
                 <div style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", fontWeight: 600 }}>{t("totalEst")}</div>
                 <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--color-accent)" }}>
-                   ~ {totalBudget.toLocaleString()} <span style={{ fontSize: "0.8rem", fontWeight: 500 }}>{slots.originCity?.includes('KUL') ? 'MYR' : 'USD'}</span>
+                  ~ {totalBudget.toLocaleString()} <span style={{ fontSize: "0.8rem", fontWeight: 500 }}>{slots.originCity?.includes('KUL') ? 'MYR' : 'USD'}</span>
                 </div>
               </div>
             )}
 
             {Object.values(slots).filter(Boolean).length === 4 && (
-              <div style={{ 
+              <div style={{
                 marginTop: "4px",
-                padding: "10px", 
-                borderRadius: "10px", 
-                background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.2))", 
-                color: "#16a34a", 
+                padding: "10px",
+                borderRadius: "10px",
+                background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.2))",
+                color: "#16a34a",
                 fontSize: "0.75rem",
                 textAlign: "center",
                 fontWeight: 700,
@@ -779,7 +779,7 @@ export default function Home() {
             <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
               {t("online")}
             </span>
-            
+
             {/* Language Toggle */}
             <button
               onClick={() => setLanguage(prev => prev === "en" ? "zh" : "en")}
@@ -833,578 +833,578 @@ export default function Home() {
             padding: "24px",
           }}
         >
-        {!hasStarted && messages.length === 0 ? (
-          /* Welcome Screen */
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              textAlign: "center",
-              gap: "32px",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "64px",
-                  marginBottom: "16px",
-                }}
-              >
-                🗺️
-              </div>
-              <h2
-                style={{
-                  fontSize: "1.75rem",
-                  fontWeight: 700,
-                  color: "var(--color-text)",
-                  marginBottom: "8px",
-                }}
-              >
-                {t("welcomeTitle")}
-              </h2>
-              <p
-                style={{
-                  color: "var(--color-text-muted)",
-                  fontSize: "0.95rem",
-                  maxWidth: "480px",
-                }}
-              >
-                {t("welcomeSubtitle")}
-              </p>
-            </div>
-
-            {/* Suggestion cards */}
+          {!hasStarted && messages.length === 0 ? (
+            /* Welcome Screen */
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, 1fr)",
-                gap: "12px",
-                maxWidth: "520px",
-                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                textAlign: "center",
+                gap: "32px",
               }}
             >
-              {(t("suggestions")).map((text, i) => (
-                <button
-                  key={i}
-                  className="option-card"
-                  onClick={() => handleSuggestionClick(text)}
+              <div>
+                <div
                   style={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "12px",
-                    padding: "16px",
-                    textAlign: "left",
-                    color: "var(--color-text)",
-                    fontSize: "0.9rem",
-                    lineHeight: 1.5,
+                    fontSize: "64px",
+                    marginBottom: "16px",
                   }}
                 >
-                  {text}
-                </button>
-              ))}
+                  🗺️
+                </div>
+                <h2
+                  style={{
+                    fontSize: "1.75rem",
+                    fontWeight: 700,
+                    color: "var(--color-text)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {t("welcomeTitle")}
+                </h2>
+                <p
+                  style={{
+                    color: "var(--color-text-muted)",
+                    fontSize: "0.95rem",
+                    maxWidth: "480px",
+                  }}
+                >
+                  {t("welcomeSubtitle")}
+                </p>
+              </div>
+
+              {/* Suggestion cards */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, 1fr)",
+                  gap: "12px",
+                  maxWidth: "520px",
+                  width: "100%",
+                }}
+              >
+                {(t("suggestions")).map((text, i) => (
+                  <button
+                    key={i}
+                    className="option-card"
+                    onClick={() => handleSuggestionClick(text)}
+                    style={{
+                      background: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      textAlign: "left",
+                      color: "var(--color-text)",
+                      fontSize: "0.9rem",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          /* Chat messages */
-          <div
+          ) : (
+            /* Chat messages */
+            <div
+              style={{
+                maxWidth: "768px",
+                margin: "0 auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: "20px",
+              }}
+            >
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  className="animate-fade-in"
+                  style={{
+                    display: "flex",
+                    justifyContent:
+                      m.role === "user" ? "flex-end" : "flex-start",
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: "85%",
+                      display: "flex",
+                      gap: "10px",
+                      flexDirection:
+                        m.role === "user" ? "row-reverse" : "row",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    {/* Avatar */}
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "10px",
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "16px",
+                        background:
+                          m.role === "user"
+                            ? "linear-gradient(135deg, #2563eb, #3b82f6)"
+                            : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                      }}
+                    >
+                      {m.role === "user" ? "👤" : "🤖"}
+                    </div>
+
+                    {/* Bubble & GenUI Tools */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
+                      {/* 普通长文本 / Markdown 渲染区 */}
+                      {m.content && (
+                        <div
+                          style={{
+                            background: m.role === "user" ? "var(--color-user-bubble)" : "var(--color-ai-bubble)",
+                            borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                            padding: "14px 18px",
+                            border: m.role === "user" ? "none" : "1px solid var(--color-border)",
+                            display: "inline-block",
+                            width: "fit-content",
+                            alignSelf: m.role === "user" ? "flex-end" : "flex-start"
+                          }}
+                        >
+                          {m.role === "user" ? (
+                            <p style={{ lineHeight: 1.6, color: "var(--color-user-text)" }}>
+                              {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
+                            </p>
+                          ) : (
+                            <div className="markdown-content">
+                              <ReactMarkdown>
+                                {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+
+                          {/* Factuality Badge (if available in stream data) */}
+                          {m.role === 'assistant' && !isLoading && (
+                            <div style={{
+                              marginTop: "12px",
+                              paddingTop: "12px",
+                              borderTop: "1px solid var(--color-border)",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              fontSize: "0.7rem",
+                              color: "var(--color-text-muted)"
+                            }}>
+                              <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 6px",
+                                background: "rgba(34, 197, 94, 0.1)",
+                                color: "#16a34a",
+                                borderRadius: "4px",
+                                fontWeight: 600
+                              }}>
+                                <span style={{ fontSize: "0.8rem" }}>🛡️</span> {t("factVerified")}
+                              </div>
+                              <span>{t("auditPassed")}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* GenUI - 拦截 Tool Calls 渲染成可交互卡片 */}
+                      {m.toolInvocations?.map((toolInv) => {
+                        const { toolName, toolCallId, state, args } = toolInv;
+
+                        // 1. 特殊卡片渲染 (展示性组件)
+                        if (state === 'result') {
+                          if (toolName === 'show_flight_card') {
+                            const flight = toolInv.args as any;
+                            return (
+                              <div key={toolCallId} className="animate-fade-in" style={{
+                                background: "linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8))",
+                                backdropFilter: "blur(20px)",
+                                border: "1px solid rgba(255, 255, 255, 0.1)",
+                                borderRadius: "20px",
+                                padding: "24px",
+                                width: "100%",
+                                maxWidth: "480px",
+                                boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+                                alignSelf: "flex-start",
+                                color: "#fff",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "16px",
+                                marginTop: m.content ? 0 : 0
+                              }}>
+                                {/* Header: Airline & Flight No */}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <span style={{ fontSize: "24px" }}>✈️</span>
+                                    <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{flight.airline}</span>
+                                  </div>
+                                  <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
+                                    {flight.flightNumber}
+                                  </span>
+                                </div>
+
+                                {/* Center: Route & Time */}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0" }}>
+                                  <div style={{ textAlign: "left" }}>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.departure?.split(' ')[0]}</div>
+                                    <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
+                                  </div>
+                                  <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", padding: "0 10px" }}>
+                                    <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.4)", marginBottom: "4px" }}>{flight.duration}</span>
+                                    <div style={{ width: "100%", height: "2px", background: "rgba(255,255,255,0.1)", position: "relative" }}>
+                                      <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "#6366f1" }} />
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.arrival?.split(' ')[0]}</div>
+                                    <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
+                                  </div>
+                                </div>
+
+                                {/* Footer: Price & Action */}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
+                                  <div>
+                                    <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>{t("estBudget")}</span>
+                                    <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#10b981" }}>{flight.price}</div>
+                                  </div>
+                                  <a
+                                    href={flight.bookingUrl && flight.bookingUrl !== '#' ? flight.bookingUrl : 'https://www.google.com/flights'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                                      color: "#fff",
+                                      padding: "10px 20px",
+                                      borderRadius: "12px",
+                                      textDecoration: "none",
+                                      fontWeight: 600,
+                                      fontSize: "0.95rem",
+                                      boxShadow: "0 4px 12px rgba(99,102,241,0.4)"
+                                    }}
+                                  >
+                                    {t("bookNow")}
+                                  </a>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (toolName === 'show_ground_transport_card') {
+                            const transport = toolInv.args as any;
+                            const transportIcons: Record<string, string> = { bus: '🚌', train: '🚄', ferry: '⛴️', driving: '🚗' };
+                            const transportLabels: Record<string, string> = { bus: '巴士', train: '火车/高铁', ferry: '轮渡', driving: '自驾' };
+                            return (
+                              <div key={toolCallId} className="animate-fade-in" style={{
+                                background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.15))",
+                                backdropFilter: "blur(20px)",
+                                border: "1px solid rgba(34, 197, 94, 0.2)",
+                                borderRadius: "20px",
+                                padding: "24px",
+                                width: "100%",
+                                maxWidth: "480px",
+                                boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+                                alignSelf: "flex-start",
+                                color: "var(--color-text)",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "16px"
+                              }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <span style={{ fontSize: "24px" }}>{transportIcons[transport.transportType] || '🚌'}</span>
+                                    <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{language === 'zh' ? (transportLabels[transport.transportType] || '陆路交通') : (transport.transportType?.toUpperCase() || 'TRANSPORT')}</span>
+                                  </div>
+                                  <span style={{ fontSize: "0.85rem", color: "#22c55e", background: "rgba(34,197,94,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
+                                    {t("recommendedRoute")}
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0" }}>
+                                  <div style={{ textAlign: "left" }}>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.fromCity}</div>
+                                  </div>
+                                  <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px" }}>
+                                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                                    <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
+                                    <div style={{ fontSize: "0.75rem", color: "#22c55e" }}>{transport.duration}</div>
+                                    <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
+                                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                                  </div>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.toCity}</div>
+                                  </div>
+                                </div>
+                                {transport.tips && (
+                                  <div style={{ background: "rgba(34, 197, 94, 0.05)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", borderLeft: "4px solid #22c55e" }}>
+                                    💡 {transport.tips}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(34, 197, 94, 0.2)" }}>
+                                  <div>
+                                    <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>{t("estBudget")}</span>
+                                    <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#16a34a" }}>{transport.price}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (toolName === 'show_map') {
+                            return (
+                              <div key={toolCallId} className="animate-fade-in w-full max-w-[600px] self-start" style={{ marginTop: m.content ? 0 : 0 }}>
+                                <InteractiveMap title={args.title} center={args.center} zoom={args.zoom} markers={args.markers} />
+                              </div>
+                            );
+                          }
+
+                          if (toolName === 'show_hotel_carousel') {
+                            return (
+                              <div key={toolCallId} className="animate-fade-in w-full self-start" style={{ marginTop: m.content ? 0 : 0 }}>
+                                <HotelCarousel title={args.title} hotels={args.hotels} />
+                              </div>
+                            );
+                          }
+                        }
+
+                        // 2. 交互式工具类型
+                        if (toolName === 'ask_user_preference' && state !== 'result') {
+                          return (
+                            <div key={toolCallId} className="animate-fade-in" style={{
+                              background: "var(--color-surface)",
+                              border: "1px solid var(--color-border)",
+                              borderRadius: "16px",
+                              padding: "20px",
+                              width: "100%",
+                              maxWidth: "480px",
+                              boxShadow: "0 4px 24px rgba(0,0,0,0.1)",
+                              alignSelf: "flex-start"
+                            }}>
+                              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "16px", color: "var(--color-text)" }}>
+                                {args.question}
+                              </h3>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                {args.options.map((opt: string, i: number) => (
+                                  <button
+                                    key={i}
+                                    onClick={() => addToolResult({ toolCallId, result: opt })}
+                                    className="option-button"
+                                    style={{
+                                      background: "var(--color-bg)",
+                                      border: "1px solid var(--color-border)",
+                                      padding: "12px 16px",
+                                      borderRadius: "10px",
+                                      textAlign: "left",
+                                      fontSize: "0.9rem",
+                                      color: "var(--color-text)",
+                                      cursor: "pointer",
+                                      transition: "all 0.2s"
+                                    }}
+                                  >
+                                    {opt}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // 3. 通用思考追踪器 (Agent Thinking Trace)
+                        const getToolLabel = (name: string, args: any) => {
+                          if (language === 'zh') {
+                            switch (name) {
+                              case 'search_web': return `正在搜索关于 "${args.query}" 的最新资讯`;
+                              case 'search_hotels': return `正在查询 ${args.location} 的酒店营业状态`;
+                              case 'search_flights_serpapi': return `正在获取实时航班报价`;
+                              case 'confirm_slot': return `已记录行程信息：${args.value}`;
+                              case 'ask_user_preference': return `已收到你的偏好选择`;
+                              default: return `执行任务：${name}`;
+                            }
+                          } else {
+                            switch (name) {
+                              case 'search_web': return `Searching for latest info on "${args.query}"`;
+                              case 'search_hotels': return `Checking hotel status in ${args.location}`;
+                              case 'search_flights_serpapi': return `Fetching real-time flight quotes`;
+                              case 'confirm_slot': return `Recorded event: ${args.value}`;
+                              case 'ask_user_preference': return `Preference received`;
+                              default: return `Task: ${name}`;
+                            }
+                          }
+                        };
+
+                        const getToolIcon = (name: string) => {
+                          switch (name) {
+                            case 'search_web': return '🌐';
+                            case 'search_hotels': return '🏨';
+                            case 'search_flights_serpapi': return '✈️';
+                            case 'confirm_slot': return '📌';
+                            default: return '⚙️';
+                          }
+                        };
+
+                        const isThinking = state !== 'result';
+                        const isSuccess = state === 'result';
+
+                        return (
+                          <div key={toolCallId} className="animate-fade-in" style={{
+                            background: isSuccess ? "rgba(34, 197, 94, 0.05)" : "rgba(99, 102, 241, 0.05)",
+                            border: `1px solid ${isSuccess ? "rgba(34, 197, 94, 0.2)" : "rgba(99, 102, 241, 0.2)"}`,
+                            borderRadius: "12px",
+                            padding: "10px 16px",
+                            width: "fit-content",
+                            alignSelf: "flex-start",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            fontSize: "0.85rem",
+                            color: isSuccess ? "#16a34a" : "var(--color-text-muted)",
+                            transition: "all 0.3s ease"
+                          }}>
+                            <span style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              animation: isThinking ? "pulse 2s infinite" : "none"
+                            }}>
+                              {isSuccess ? "✅" : getToolIcon(toolName)}
+                            </span>
+                            <span style={{ fontWeight: isSuccess ? 600 : 400 }}>
+                              {getToolLabel(toolName, args)}
+                              {isThinking && <span className="thinking-dots">...</span>}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Typing indicator */}
+              {isLoading &&
+                messages[messages.length - 1]?.role !== "assistant" && (
+                  <div
+                    className="animate-fade-in"
+                    style={{ display: "flex", gap: "10px", alignItems: "center" }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "10px",
+                        background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "16px",
+                      }}
+                    >
+                      🤖
+                    </div>
+                    <div
+                      style={{
+                        background: "var(--color-ai-bubble)",
+                        border: "1px solid var(--color-border)",
+                        borderRadius: "16px 16px 16px 4px",
+                        padding: "14px 18px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "2px",
+                      }}
+                    >
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                    </div>
+                  </div>
+                )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Input area */}
+        <div
+          style={{
+            borderTop: "1px solid var(--color-border)",
+            background: "var(--color-surface)",
+            padding: "16px 24px",
+          }}
+        >
+          <form
+            id="chat-form"
+            onSubmit={onSubmit}
             style={{
               maxWidth: "768px",
               margin: "0 auto",
               display: "flex",
-              flexDirection: "column",
-              gap: "20px",
+              gap: "10px",
             }}
           >
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className="animate-fade-in"
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    m.role === "user" ? "flex-end" : "flex-start",
-                }}
-              >
-                <div
-                  style={{
-                    maxWidth: "85%",
-                    display: "flex",
-                    gap: "10px",
-                    flexDirection:
-                      m.role === "user" ? "row-reverse" : "row",
-                    alignItems: "flex-start",
-                  }}
-                >
-                  {/* Avatar */}
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "10px",
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "16px",
-                      background:
-                        m.role === "user"
-                          ? "linear-gradient(135deg, #2563eb, #3b82f6)"
-                          : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                    }}
-                  >
-                    {m.role === "user" ? "👤" : "🤖"}
-                  </div>
-
-                  {/* Bubble & GenUI Tools */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
-                    {/* 普通长文本 / Markdown 渲染区 */}
-                    {m.content && (
-                      <div
-                        style={{
-                          background: m.role === "user" ? "var(--color-user-bubble)" : "var(--color-ai-bubble)",
-                          borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                          padding: "14px 18px",
-                          border: m.role === "user" ? "none" : "1px solid var(--color-border)",
-                          display: "inline-block",
-                          width: "fit-content",
-                          alignSelf: m.role === "user" ? "flex-end" : "flex-start"
-                        }}
-                      >
-                        {m.role === "user" ? (
-                          <p style={{ lineHeight: 1.6, color: "var(--color-user-text)" }}>
-                            {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
-                          </p>
-                        ) : (
-                          <div className="markdown-content">
-                            <ReactMarkdown>
-                               {typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}
-                            </ReactMarkdown>
-                          </div>
-                        )}
-
-                        {/* Factuality Badge (if available in stream data) */}
-                        {m.role === 'assistant' && !isLoading && (
-                          <div style={{ 
-                            marginTop: "12px", 
-                            paddingTop: "12px", 
-                            borderTop: "1px solid var(--color-border)",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            fontSize: "0.7rem",
-                            color: "var(--color-text-muted)"
-                          }}>
-                            <div style={{ 
-                              display: "flex", 
-                              alignItems: "center", 
-                              gap: "4px", 
-                              padding: "2px 6px", 
-                              background: "rgba(34, 197, 94, 0.1)", 
-                              color: "#16a34a", 
-                              borderRadius: "4px",
-                              fontWeight: 600
-                            }}>
-                              <span style={{ fontSize: "0.8rem" }}>🛡️</span> {t("factVerified")}
-                            </div>
-                            <span>{t("auditPassed")}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* GenUI - 拦截 Tool Calls 渲染成可交互卡片 */}
-                    {m.toolInvocations?.map((toolInv) => {
-                      const { toolName, toolCallId, state, args } = toolInv;
-
-                      // 1. 特殊卡片渲染 (展示性组件)
-                      if (state === 'result') {
-                        if (toolName === 'show_flight_card') {
-                          const flight = toolInv.args as any;
-                          return (
-                            <div key={toolCallId} className="animate-fade-in" style={{
-                              background: "linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8))",
-                              backdropFilter: "blur(20px)",
-                              border: "1px solid rgba(255, 255, 255, 0.1)",
-                              borderRadius: "20px",
-                              padding: "24px",
-                              width: "100%",
-                              maxWidth: "480px",
-                              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-                              alignSelf: "flex-start",
-                              color: "#fff",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "16px",
-                              marginTop: m.content ? 0 : 0
-                            }}>
-                              {/* Header: Airline & Flight No */}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <span style={{ fontSize: "24px" }}>✈️</span>
-                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{flight.airline}</span>
-                                </div>
-                                <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
-                                  {flight.flightNumber}
-                                </span>
-                              </div>
-
-                              {/* Center: Route & Time */}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0" }}>
-                                <div style={{ textAlign: "left" }}>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.departure?.split(' ')[0]}</div>
-                                  <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.departure?.split(' ').slice(1).join(' ')}</div>
-                                </div>
-                                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", padding: "0 10px" }}>
-                                  <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.4)", marginBottom: "4px" }}>{flight.duration}</span>
-                                  <div style={{ width: "100%", height: "2px", background: "rgba(255,255,255,0.1)", position: "relative" }}>
-                                    <div style={{ position: "absolute", right: "-4px", top: "-4px", width: "10px", height: "10px", borderRadius: "50%", background: "#6366f1" }} />
-                                  </div>
-                                </div>
-                                <div style={{ textAlign: "right" }}>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{flight.arrival?.split(' ')[0]}</div>
-                                  <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.5)" }}>{flight.arrival?.split(' ').slice(1).join(' ')}</div>
-                                </div>
-                              </div>
-
-                              {/* Footer: Price & Action */}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
-                                <div>
-                                  <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>{t("estBudget")}</span>
-                                  <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#10b981" }}>{flight.price}</div>
-                                </div>
-                                <a 
-                                  href={flight.bookingUrl && flight.bookingUrl !== '#' ? flight.bookingUrl : 'https://www.google.com/flights'} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  style={{
-                                    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                                    color: "#fff",
-                                    padding: "10px 20px",
-                                    borderRadius: "12px",
-                                    textDecoration: "none",
-                                    fontWeight: 600,
-                                    fontSize: "0.95rem",
-                                    boxShadow: "0 4px 12px rgba(99,102,241,0.4)"
-                                  }}
-                                >
-                                  {t("bookNow")}
-                                </a>
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        if (toolName === 'show_ground_transport_card') {
-                          const transport = toolInv.args as any;
-                          const transportIcons: Record<string, string> = { bus: '🚌', train: '🚄', ferry: '⛴️', driving: '🚗' };
-                          const transportLabels: Record<string, string> = { bus: '巴士', train: '火车/高铁', ferry: '轮渡', driving: '自驾' };
-                          return (
-                            <div key={toolCallId} className="animate-fade-in" style={{
-                              background: "linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.15))",
-                              backdropFilter: "blur(20px)",
-                              border: "1px solid rgba(34, 197, 94, 0.2)",
-                              borderRadius: "20px",
-                              padding: "24px",
-                              width: "100%",
-                              maxWidth: "480px",
-                              boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
-                              alignSelf: "flex-start",
-                              color: "var(--color-text)",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "16px"
-                            }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <span style={{ fontSize: "24px" }}>{transportIcons[transport.transportType] || '🚌'}</span>
-                                  <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{language === 'zh' ? (transportLabels[transport.transportType] || '陆路交通') : (transport.transportType?.toUpperCase() || 'TRANSPORT')}</span>
-                                </div>
-                                <span style={{ fontSize: "0.85rem", color: "#22c55e", background: "rgba(34,197,94,0.1)", padding: "4px 8px", borderRadius: "12px" }}>
-                                  {t("recommendedRoute")}
-                                </span>
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0" }}>
-                                <div style={{ textAlign: "left" }}>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.fromCity}</div>
-                                </div>
-                                <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 16px" }}>
-                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                                  <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
-                                  <div style={{ fontSize: "0.75rem", color: "#22c55e" }}>{transport.duration}</div>
-                                  <div style={{ flex: 1, height: 2, background: "rgba(34,197,94,0.4)", margin: "0 8px" }} />
-                                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                                </div>
-                                <div style={{ textAlign: "right" }}>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{transport.toCity}</div>
-                                </div>
-                              </div>
-                              {transport.tips && (
-                                <div style={{ background: "rgba(34, 197, 94, 0.05)", borderRadius: "8px", padding: "12px", fontSize: "0.85rem", borderLeft: "4px solid #22c55e" }}>
-                                  💡 {transport.tips}
-                                </div>
-                              )}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed rgba(34, 197, 94, 0.2)" }}>
-                                <div>
-                                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>{t("estBudget")}</span>
-                                  <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "#16a34a" }}>{transport.price}</div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        if (toolName === 'show_map') {
-                          return (
-                            <div key={toolCallId} className="animate-fade-in w-full max-w-[600px] self-start" style={{ marginTop: m.content ? 0 : 0 }}>
-                              <InteractiveMap title={args.title} center={args.center} zoom={args.zoom} markers={args.markers} />
-                            </div>
-                          );
-                        }
-
-                        if (toolName === 'show_hotel_carousel') {
-                          return (
-                            <div key={toolCallId} className="animate-fade-in w-full self-start" style={{ marginTop: m.content ? 0 : 0 }}>
-                              <HotelCarousel title={args.title} hotels={args.hotels} />
-                            </div>
-                          );
-                        }
-                      }
-
-                      // 2. 交互式工具类型
-                      if (toolName === 'ask_user_preference' && state !== 'result') {
-                        return (
-                          <div key={toolCallId} className="animate-fade-in" style={{
-                            background: "var(--color-surface)",
-                            border: "1px solid var(--color-border)",
-                            borderRadius: "16px",
-                            padding: "20px",
-                            width: "100%",
-                            maxWidth: "480px",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.1)",
-                            alignSelf: "flex-start"
-                          }}>
-                            <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "16px", color: "var(--color-text)" }}>
-                              {args.question}
-                            </h3>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                              {args.options.map((opt: string, i: number) => (
-                                <button
-                                  key={i}
-                                  onClick={() => addToolResult({ toolCallId, result: opt })}
-                                  className="option-button"
-                                  style={{
-                                    background: "var(--color-bg)",
-                                    border: "1px solid var(--color-border)",
-                                    padding: "12px 16px",
-                                    borderRadius: "10px",
-                                    textAlign: "left",
-                                    fontSize: "0.9rem",
-                                    color: "var(--color-text)",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s"
-                                  }}
-                                >
-                                  {opt}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // 3. 通用思考追踪器 (Agent Thinking Trace)
-                      const getToolLabel = (name: string, args: any) => {
-                        if (language === 'zh') {
-                          switch (name) {
-                            case 'search_web': return `正在搜索关于 "${args.query}" 的最新资讯`;
-                            case 'search_hotels': return `正在查询 ${args.location} 的酒店营业状态`;
-                            case 'search_flights_serpapi': return `正在获取实时航班报价`;
-                            case 'confirm_slot': return `已记录行程信息：${args.value}`;
-                            case 'ask_user_preference': return `已收到你的偏好选择`;
-                            default: return `执行任务：${name}`;
-                          }
-                        } else {
-                          switch (name) {
-                            case 'search_web': return `Searching for latest info on "${args.query}"`;
-                            case 'search_hotels': return `Checking hotel status in ${args.location}`;
-                            case 'search_flights_serpapi': return `Fetching real-time flight quotes`;
-                            case 'confirm_slot': return `Recorded event: ${args.value}`;
-                            case 'ask_user_preference': return `Preference received`;
-                            default: return `Task: ${name}`;
-                          }
-                        }
-                      };
-
-                      const getToolIcon = (name: string) => {
-                        switch (name) {
-                          case 'search_web': return '🌐';
-                          case 'search_hotels': return '🏨';
-                          case 'search_flights_serpapi': return '✈️';
-                          case 'confirm_slot': return '📌';
-                          default: return '⚙️';
-                        }
-                      };
-
-                      const isThinking = state !== 'result';
-                      const isSuccess = state === 'result';
-
-                      return (
-                        <div key={toolCallId} className="animate-fade-in" style={{
-                          background: isSuccess ? "rgba(34, 197, 94, 0.05)" : "rgba(99, 102, 241, 0.05)",
-                          border: `1px solid ${isSuccess ? "rgba(34, 197, 94, 0.2)" : "rgba(99, 102, 241, 0.2)"}`,
-                          borderRadius: "12px",
-                          padding: "10px 16px",
-                          width: "fit-content",
-                          alignSelf: "flex-start",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          fontSize: "0.85rem",
-                          color: isSuccess ? "#16a34a" : "var(--color-text-muted)",
-                          transition: "all 0.3s ease"
-                        }}>
-                          <span style={{ 
-                            display: "inline-flex", 
-                            alignItems: "center", 
-                            justifyContent: "center",
-                            animation: isThinking ? "pulse 2s infinite" : "none" 
-                          }}>
-                            {isSuccess ? "✅" : getToolIcon(toolName)}
-                          </span>
-                          <span style={{ fontWeight: isSuccess ? 600 : 400 }}>
-                            {getToolLabel(toolName, args)}
-                            {isThinking && <span className="thinking-dots">...</span>}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Typing indicator */}
-            {isLoading &&
-              messages[messages.length - 1]?.role !== "assistant" && (
-                <div
-                  className="animate-fade-in"
-                  style={{ display: "flex", gap: "10px", alignItems: "center" }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "10px",
-                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "16px",
-                    }}
-                  >
-                    🤖
-                  </div>
-                  <div
-                    style={{
-                      background: "var(--color-ai-bubble)",
-                      border: "1px solid var(--color-border)",
-                      borderRadius: "16px 16px 16px 4px",
-                      padding: "14px 18px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "2px",
-                    }}
-                  >
-                    <span className="typing-dot" />
-                    <span className="typing-dot" />
-                    <span className="typing-dot" />
-                  </div>
-                </div>
-              )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-      </div>
-
-      {/* Input area */}
-      <div
-        style={{
-          borderTop: "1px solid var(--color-border)",
-          background: "var(--color-surface)",
-          padding: "16px 24px",
-        }}
-      >
-        <form
-          id="chat-form"
-          onSubmit={onSubmit}
-          style={{
-            maxWidth: "768px",
-            margin: "0 auto",
-            display: "flex",
-            gap: "10px",
-          }}
-        >
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={handleInputChange}
-            placeholder={t("inputPlaceholder")}
-            disabled={isLoading}
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              placeholder={t("inputPlaceholder")}
+              disabled={isLoading}
+              style={{
+                flex: 1,
+                background: "var(--color-bg)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "12px",
+                padding: "14px 18px",
+                color: "var(--color-text)",
+                fontSize: "0.95rem",
+                outline: "none",
+                transition: "border-color 0.2s",
+              }}
+              onFocus={(e) =>
+                (e.currentTarget.style.borderColor = "var(--color-accent)")
+              }
+              onBlur={(e) =>
+                (e.currentTarget.style.borderColor = "var(--color-border)")
+              }
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              style={{
+                background:
+                  isLoading || !input.trim()
+                    ? "var(--color-btn-disabled-bg)"
+                    : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                border: "none",
+                borderRadius: "12px",
+                padding: "14px 24px",
+                color: isLoading || !input.trim() ? "var(--color-btn-disabled-text)" : "#fff",
+                fontWeight: 600,
+                fontSize: "0.95rem",
+                cursor: isLoading || !input.trim() ? "not-allowed" : "pointer",
+                transition: "all 0.2s",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isLoading ? t("thinking") : t("send")}
+            </button>
+          </form>
+          <p
             style={{
-              flex: 1,
-              background: "var(--color-bg)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "12px",
-              padding: "14px 18px",
-              color: "var(--color-text)",
-              fontSize: "0.95rem",
-              outline: "none",
-              transition: "border-color 0.2s",
-            }}
-            onFocus={(e) =>
-              (e.currentTarget.style.borderColor = "var(--color-accent)")
-            }
-            onBlur={(e) =>
-              (e.currentTarget.style.borderColor = "var(--color-border)")
-            }
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            style={{
-              background:
-                isLoading || !input.trim()
-                  ? "var(--color-btn-disabled-bg)"
-                  : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-              border: "none",
-              borderRadius: "12px",
-              padding: "14px 24px",
-              color: isLoading || !input.trim() ? "var(--color-btn-disabled-text)" : "#fff",
-              fontWeight: 600,
-              fontSize: "0.95rem",
-              cursor: isLoading || !input.trim() ? "not-allowed" : "pointer",
-              transition: "all 0.2s",
-              whiteSpace: "nowrap",
+              textAlign: "center",
+              fontSize: "0.7rem",
+              color: "#555",
+              marginTop: "8px",
             }}
           >
-            {isLoading ? t("thinking") : t("send")}
-          </button>
-        </form>
-        <p
-          style={{
-            textAlign: "center",
-            fontSize: "0.7rem",
-            color: "#555",
-            marginTop: "8px",
-          }}
-        >
-          {t("disclaimer")}
-        </p>
-      </div>
+            {t("disclaimer")}
+          </p>
+        </div>
       </div>
     </div>
   );

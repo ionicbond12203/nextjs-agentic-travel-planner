@@ -21,7 +21,7 @@ const ollama = createOpenAI({
   apiKey: "ollama",
 });
 
-const cloudModel = ollama("glm-5:cloud");
+const cloudModel = ollama("gemma4:31b-cloud");
 
 function getSessionId(req: Request): string {
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
@@ -32,10 +32,10 @@ function getSessionId(req: Request): string {
 async function getOrchestratorIntent(messages: any[], state: DialogueState, model: any): Promise<'FLIGHT_AGENT' | 'HOTEL_AGENT' | 'PLANNER_AGENT' | 'GENERAL_CHAT' | 'OUT_OF_SCOPE' | 'RESTRICTED'> {
   const lastMsg = messages[messages.length - 1];
   const content = lastMsg.content || "";
-  
+
   if (/(暴力|色情|毒品|自杀|枪支|炸药|非法|赌博|vpn|翻墙)/i.test(content)) return 'OUT_OF_SCOPE';
   if (/^(hi|hello|hey|你好|您好|哈喽|早上好|下午好|在吗)/i.test(content) && content.length < 15) return 'GENERAL_CHAT';
-  
+
   const restrictionError = checkTravelRestrictions(state.slots.originCity || 'KUL', content);
   if (restrictionError) return 'RESTRICTED';
 
@@ -68,13 +68,13 @@ async function compactContext(messages: any[]): Promise<any[]> {
   if (messages.length < 15) return messages;
   const systemMsg = messages[0];
   const initialUserMsg = messages[1];
-  
+
   // Cut out the middle messages for summarization. Keep last 7 messages intact.
   const recentMessages = messages.slice(-7);
   const oldMessages = messages.slice(2, -7);
-  
+
   const chatLog = oldMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
-  
+
   const { text: summary } = await generateText({
     model: cloudModel,
     system: "You are a context compression engine for a travel planning AI. Summarize the following chat log to extract all travel constraints, locations, preferences, budgets, and discussed itineraries. Keep it extremely concise but do not lose facts. Always extract confirmed numbers and locations.",
@@ -127,11 +127,11 @@ function syncDialogueState(messages: any[], state: DialogueState): DialogueState
 export async function POST(req: Request) {
   const { id = '', messages, language = 'en' } = await req.json();
   const sanitizedMessages = messages.map((m: any) => ({ ...m }));
-  
+
   // Use user IP + Chat ID (if provided) to isolate session, or fallback to simple IP
   const baseSessionId = getSessionId(req);
   const sessionId = id ? `${baseSessionId}-${id}` : baseSessionId;
-  
+
   let state = (await getSession(sessionId)) || initDialogueState();
 
   // Reset dialogue memory if this is the very first message of the chat
@@ -359,17 +359,17 @@ export async function POST(req: Request) {
         try {
           // Do not await session saving to prevent hanging the response
           setSession(sessionId, state).catch(e => console.error('Session save error:', e));
-          
+
           let factualityScore = 1.0;
           if (text) {
             try {
               const actualUserQuery = (sanitizedMessages as any[]).filter((m: any) => m.role === 'user').slice(-1)[0]?.content || lastMsgContent;
-              
+
               // 5-second timeout for factuality grading to prevent stream hanging
               const gradingPromise = gradeFactuality(actualUserQuery, text);
               const timeoutPromise = new Promise<{ score: number }>((_, reject) => setTimeout(() => reject(new Error('Grade timeout')), 5000));
               const factuality = await Promise.race([gradingPromise, timeoutPromise]);
-              
+
               factualityScore = factuality.score;
             } catch (e) {
               console.warn('Factuality eval skipped/error:', e);
