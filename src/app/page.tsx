@@ -84,6 +84,11 @@ const DICTIONARY = {
     style: "Style",
     totalEst: "Total Est. Budget 💰",
     readyToPlan: "✅ Ready to plan your trip",
+    chatList: "Chat List",
+    noHistory: "No chat history",
+    deleteChat: "Delete chat",
+    clearAll: "Clear all history",
+    confirmClear: "Are you sure you want to clear all chat history? This action cannot be undone.",
   },
   zh: {
     title: "Travel planner",
@@ -121,6 +126,11 @@ const DICTIONARY = {
     style: "旅行风格",
     totalEst: "预估总支出 💰",
     readyToPlan: "✅ 已准备好为您规划细节",
+    chatList: "对话列表",
+    noHistory: "暂无对话记录",
+    deleteChat: "删除对话",
+    clearAll: "清空所有记录",
+    confirmClear: "确定要清空所有聊天记录吗？此操作不可撤销。",
   }
 };
 
@@ -319,7 +329,7 @@ export default function Home() {
   }, [sessions, setMessages]);
 
   const handleClearAllSessions = useCallback(() => {
-    if (!window.confirm("确定要清空所有聊天记录吗？此操作不可撤销。")) return;
+    if (!window.confirm(t("confirmClear") as string)) return;
 
     localStorage.removeItem(LS_SESSIONS);
     localStorage.removeItem(LS_ACTIVE);
@@ -332,7 +342,7 @@ export default function Home() {
     setSessionId(newId);
     saveActiveId(newId);
     setSidebarOpen(false);
-  }, [setMessages]);
+  }, [setMessages, t]);
 
   /* ─── Loading skeleton ─── */
   if (!mounted) {
@@ -422,7 +432,7 @@ export default function Home() {
           }}
         >
           <span style={{ fontWeight: 700, fontSize: "1rem", color: "var(--color-text)" }}>
-            💬 对话列表
+            💬 {t("chatList")}
           </span>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -460,7 +470,7 @@ export default function Home() {
               transition: "opacity 0.2s",
             }}
           >
-            ＋ 新对话
+            ＋ {t("newChat")}
           </button>
         </div>
 
@@ -468,7 +478,7 @@ export default function Home() {
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
           {sortedSessions.length === 0 ? (
             <div style={{ color: "var(--color-text-muted)", fontSize: "0.85rem", textAlign: "center", padding: "24px 0" }}>
-              暂无对话记录
+              {t("noHistory")}
             </div>
           ) : (
             sortedSessions.map(s => (
@@ -511,7 +521,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={(e) => handleDeleteSession(s.id, e)}
-                  title="删除对话"
+                  title={t("deleteChat") as string}
                   style={{
                     background: "transparent",
                     border: "none",
@@ -563,7 +573,7 @@ export default function Home() {
               (e.currentTarget.style.background = "transparent");
             }}
           >
-            🗑 清空所有记录
+            🗑 {t("clearAll")}
           </button>
         </div>
       </aside>
@@ -687,7 +697,7 @@ export default function Home() {
           {/* Sidebar toggle */}
           <button
             onClick={() => setSidebarOpen(o => !o)}
-            title="对话列表"
+            title={t("chatList") as string}
             style={{
               background: "transparent",
               border: "1px solid var(--color-border)",
