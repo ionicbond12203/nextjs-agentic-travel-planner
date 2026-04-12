@@ -154,6 +154,8 @@ function BriefItem({ label, value, icon }: { label: string, value?: string, icon
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
+  const languageRef = useRef(language);
+  useEffect(() => { languageRef.current = language; }, [language]);
 
   const t = useCallback(<T extends keyof typeof DICTIONARY["en"]>(key: T): typeof DICTIONARY["en"][T] => {
     return DICTIONARY[language][key];
@@ -163,8 +165,8 @@ export default function Home() {
   const chatOptions = useMemo(() => ({
     api: "/api/chat",
     initialMessages,
-    body: { language },
-  }), [initialMessages, language]);
+    body: { language: languageRef.current },
+  }), [initialMessages]);
 
   const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, addToolResult, data } =
     useChat(chatOptions);
@@ -180,6 +182,9 @@ export default function Home() {
   // Ref to avoid stale closures in the save effect
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+
+  // Ref to track last-saved messages content and prevent infinite update loops
+  const prevMessagesSerialized = useRef<string>("");
 
   /* ─── Init: load sessions from localStorage ─── */
   useEffect(() => {
@@ -202,48 +207,63 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Persist messages into current session whenever they change ─── */
+  /* ─── Persist messages into current session whenever they change (debounced) ─── */
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!mounted || !sessionIdRef.current) return;
-    const sid = sessionIdRef.current;
 
-    setSessions(prev => {
-      const idx = prev.findIndex(s => s.id === sid);
+    // Short-circuit if messages content hasn't actually changed
+    const serialized = JSON.stringify(messages);
+    if (serialized === prevMessagesSerialized.current) return;
+    prevMessagesSerialized.current = serialized;
 
-      // No messages → nothing to persist (fresh session that hasn't sent yet)
-      if (messages.length === 0) {
-        // If the session already existed but is now empty (user cleared), remove it
-        if (idx !== -1) {
-          const next = prev.filter(s => s.id !== sid);
-          saveSessions(next);
-          return next;
+    // Debounce to avoid rapid setState during streaming
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      const sid = sessionIdRef.current;
+
+      setSessions(prev => {
+        const idx = prev.findIndex(s => s.id === sid);
+
+        // No messages → nothing to persist (fresh session that hasn't sent yet)
+        if (messages.length === 0) {
+          // If the session already existed but is now empty (user cleared), remove it
+          if (idx !== -1) {
+            const next = prev.filter(s => s.id !== sid);
+            saveSessions(next);
+            return next;
+          }
+          return prev;
         }
-        return prev;
-      }
 
-      // Derive title from the first user message
-      const firstUserMsg = messages.find(m => m.role === "user");
-      const title = firstUserMsg
-        ? (typeof firstUserMsg.content === "string" ? firstUserMsg.content : "新对话").slice(0, 20)
-        : "新对话";
+        // Derive title from the first user message
+        const firstUserMsg = messages.find(m => m.role === "user");
+        const title = firstUserMsg
+          ? (typeof firstUserMsg.content === "string" ? firstUserMsg.content : "新对话").slice(0, 20)
+          : "新对话";
 
-      const updated: ChatSession = {
-        id: sid,
-        title,
-        messages,
-        updatedAt: Date.now(),
-      };
+        const updated: ChatSession = {
+          id: sid,
+          title,
+          messages,
+          updatedAt: Date.now(),
+        };
 
-      let next: ChatSession[];
-      if (idx !== -1) {
-        next = [...prev];
-        next[idx] = updated;
-      } else {
-        next = [updated, ...prev];
-      }
-      saveSessions(next);
-      return next;
-    });
+        let next: ChatSession[];
+        if (idx !== -1) {
+          next = [...prev];
+          next[idx] = updated;
+        } else {
+          next = [updated, ...prev];
+        }
+        saveSessions(next);
+        return next;
+      });
+    }, 300);
+
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
   }, [messages, mounted]);
 
   /* ─── Travel Brief State ─── */
@@ -928,7 +948,7 @@ export default function Home() {
                 gap: "20px",
               }}
             >
-              {messages.map((m) => (
+              {messages.map((m, mIndex) => (
                 <div
                   key={m.id}
                   className="animate-fade-in"
@@ -1184,7 +1204,14 @@ export default function Home() {
                         }
 
                         // 2. 交互式工具类型
-                        if (toolName === 'ask_user_preference' && state !== 'result') {
+                        if (toolName === 'ask_user_preference') {
+                          const isResolved = state === 'result';
+                          const hasSubsequentMessages = mIndex < messages.length - 1;
+                          
+                          if (isResolved || hasSubsequentMessages) {
+                            return null;
+                          }
+
                           return (
                             <div key={toolCallId} className="animate-fade-in" style={{
                               background: "var(--color-surface)",

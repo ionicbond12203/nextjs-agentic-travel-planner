@@ -28,7 +28,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 
   const langInstruction = language === 'zh' 
     ? "你必须全程使用【中文】进行回复。保持回复内容的专业性、亲和力，并善用 emoji。"
-    : "You MUST respond entirely in 【English】. Maintain a professional yet friendly tone, and use emojis appropriately.";
+    : "You MUST respond entirely in English. Maintain a professional yet friendly tone, and use emojis appropriately. CRITICAL: Do NOT mix any Chinese characters into English responses. Use English equivalents only (e.g. 'approx.' instead of Chinese characters). Every character must be English/Latin script, numbers, or emojis.";
 
   // 计算默认未来出行日期（两周后）
   const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -66,6 +66,14 @@ ${langInstruction}
 ${agentRole === 'FLIGHT_AGENT' ? '- show_flight_card：展示航班推荐' : ''}
 ${agentRole === 'HOTEL_AGENT' ? '- show_hotel_carousel：展示酒店推荐（至少 3 个选项）' : ''}
 ${agentRole === 'PLANNER_AGENT' ? '- show_ground_transport_card：展示陆路交通推荐\n- show_map：标注关键位置。在标注具体景点前，必须先调用 search_place_coordinates。' : ''}
+
+### CRITICAL: Anti-Hallucination Rule for Prices and Transport
+BEFORE calling show_ground_transport_card or show_flight_card, you MUST FIRST call search_web to retrieve real pricing data for that specific route.
+- You are FORBIDDEN from inventing train, bus, or flight prices from your training data.
+- The price field in transport cards MUST come from search_web results or be marked as 'Price varies - check official booking site'.
+- If search_web returns no price data, set price to 'Price varies - check official site' instead of guessing.
+- Each transport card MUST have a DIFFERENT, route-specific price. Identical prices for different routes is a hallucination red flag.
+- When converting currencies, always show the conversion as 'approx.' or '~', never use Chinese characters in English mode.
 `;
 
   // 状态上下文
